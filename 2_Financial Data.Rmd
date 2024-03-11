@@ -1,0 +1,1006 @@
+---
+title: "2_ Financial Data"
+author: "Wenqiang Li"
+date: "2024-02-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 2. Financial Data
+
+### 2.1 Accessing and Managing Financial Data
+
+在本章中，我们建议一种组织财务数据的方法。有数据处理经验的每个人也都熟悉以各种格式存储数据，例如 CSV、XLS、XLSX 或其他分隔值存储。在跨不同项目和不同编程语言使用不同数据格式的情况下，读取和保存数据可能会变得非常麻烦。此外，将数据存储在分隔文件中通常会导致列类型一致性问题。例如，日期类型列经常导致不同数据格式和编程语言之间的不一致。
+
+本章介绍如何导入不同的开源数据集。具体来说，我们的数据来自 Yahoo!Finance 的应用程序编程接口 (API)、下载的标准 CSV 文件、存储在公共 Google Drive 存储库中的 XLSX 文件以及其他宏观经济时间序列。我们将所有数据存储在一个*数据库*中，该数据库作为后续章节的唯一数据源。我们通过提供一些管理数据库的技巧来结束本章。
+
+首先，我们加载本章中使用的全局 R 包。稍后，我们在需要的部分加载更多包。
+
+```{r}
+library(tidyverse)
+library(scales)
+```
+
+此外，我们最初定义了获取和存储财务数据的日期范围，使未来的数据更新变得容易处理。如果您需要其他时间范围，您可以调整下面的日期。我们的数据从 1960 年开始，因为大多数资产定价研究都使用 1962 年以来的数据。
+
+``` r
+start_date <- ymd("1960-01-01")
+end_date <- ymd("2022-12-31")
+```
+
+#### Fama-French Data
+
+我们首先下载一些著名的 Fama-French 因子（例如，[Fama 和 French 1993](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Fama1993)）和经验资产定价中常用的投资组合回报。幸运的是，[Nelson Areal](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://github.com/nareal/frenchdata/)提供了一个简洁的软件包，可以让我们轻松访问数据：该软件包提供了从[Kenneth French 教授金融数据库](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html)（[Areal 2021](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-frenchdata)）`frenchdata`下载和读取数据集的功能。
+
+```{r}
+library(frenchdata)
+```
+
+我们可以使用`download_french_data()`该软件包的功能来下载每月的Fama-French因素。*Fama/French 3 Factors*集合包含市场回报时间序列`mkt_excess`、规模`smb`和价值`hml`以及无风险利率`rf`。请注意，我们必须做一些手动工作才能正确解析所有列并适当缩放它们，因为原始 Fama-French 数据采用非常不切实际的数据格式。对于变量的精确描述，我们建议直接查阅Kenneth French教授的金融数据库。如果您在网站上，请检查原始数据文件，以了解由于`frenchdata`.
+
+```{r}
+factors_ff3_monthly_raw <- download_french_data("Fama/French 3 Factors")
+factors_ff3_monthly <- factors_ff3_monthly_raw$subsets$data[[1]] |>
+  mutate(
+    month = floor_date(ymd(str_c(date, "01")), "month"),
+    across(c(RF, `Mkt-RF`, SMB, HML), ~as.numeric(.) / 100),
+    .keep = "none"
+  ) |>
+  rename_with(str_to_lower) |>
+  rename(mkt_excess = `mkt-rf`) |> 
+  filter(month >= start_date & month <= end_date)
+```
+
+*我们还下载了5 个因素 (2x3)*集，其中还包括盈利能力`rmw`和投资因素的回报时间序列`cma`。[我们在\"复制 Fama 和 French Factors\"](https://www-tidy--finance-org.translate.goog/r/replicating-fama-and-french-factors.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)一章中演示了如何构建每月因子。
+
+```{r}
+factors_ff5_monthly_raw <- download_french_data("Fama/French 5 Factors (2x3)")
+
+factors_ff5_monthly <- factors_ff5_monthly_raw$subsets$data[[1]] |>
+ mutate(
+  month = floor_date(ymd(str_c(date, "01")), "month"),
+  across(c(RF, `Mkt-RF`, SMB, HML, RMW, CMA), ~as.numeric(.) / 100),
+  .keep = "none"
+  ) |>
+ rename_with(str_to_lower) |>
+ rename(mkt_excess = `mkt-rf`) |> 
+ filter(month >= start_date & month <= end_date)
+```
+
+下载相应的*每日*Fama-French 因子非常简单，具有相同的功能。
+
+```{r}
+factors_ff3_daily_raw <- download_french_data("Fama/French 3 Factors [Daily]")
+
+factors_ff3_daily <- factors_ff3_daily_raw$subsets$data[[1]] |>
+ mutate(
+  date = ymd(date),
+  across(c(RF, `Mkt-RF`, SMB, HML), ~as.numeric(.) / 100),
+  .keep = "none"
+  ) |>
+ rename_with(str_to_lower) |>
+ rename(mkt_excess = `mkt-rf`) |>
+ filter(date >= start_date & date <= end_date)
+```
+
+在后续章节中，我们还将使用 10 个月的行业投资组合，因此让我们也获取该数据。
+
+```{r}
+industries_ff_monthly_raw <- download_french_data("10 Industry Portfolios")
+
+industries_ff_monthly <- industries_ff_monthly_raw$subsets$data[[1]] |>
+ mutate(month = floor_date(ymd(str_c(date, "01")), "month")) |>
+ mutate(across(where(is.numeric), ~ . / 100)) |>
+ select(month, everything(), -date) |>
+ filter(month >= start_date & month <= end_date) |> 
+ rename_with(str_to_lower)
+```
+
+值得一看的是 Kenneth French 主页上所有可用的投资组合回报时间序列。您应该通过致电查看其他集合`get_french_data_list()`。如需下载 Fama-French 数据的替代方法，请查看[Sebastian Stöckl](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://github.com/sstoeckl/ffdownload)`FFdownload`提供的软件包。
+
+#### **q 因子**
+
+近年来，学术讨论经历了替代因子模型的兴起，例如Hou，Xue和Zhang（[2014](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Hou2015)） *q*因子模型的形式。我们参考原作者提供的[扩展背景信息以获取更多信息。](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=http://global-q.org/background.html)*q*因子可以直接从作者的主页下载`read_csv()`。
+
+我们还需要调整这个数据。首先，我们丢弃在本书的其余部分中不会使用的信息。然后，我们使用正则表达式用\"R\_\"指令重命名列，并以小写形式写入所有列名称。您应该始终尝试坚持一致的对象命名风格，我们试图在这里进行说明 - 重点是*try*。您可以查看在线提供的风格指南，例如[Hadley Wickham 的`tidyverse`风格指南。](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://style.tidyverse.org/)
+
+```{r}
+factors_q_monthly_link <-
+ "https://global-q.org/uploads/1/2/2/6/122679606/q5_factors_monthly_2022.csv"
+
+factors_q_monthly <- read_csv(factors_q_monthly_link) |>
+ mutate(month = ymd(str_c(year, month, "01", sep = "-"))) |>
+ select(-R_F, -R_MKT, -year) |>
+ rename_with(~ str_remove(., "R_")) |>
+ rename_with(~ str_to_lower(.)) |>
+ mutate(across(-month, ~ . / 100)) |>
+ filter(month >= start_date & month <= end_date)
+```
+
+#### **宏观经济预测**
+
+我们的下一个数据源是一组经常用作股票溢价预测因素的宏观经济变量。Welch 和 Goyal ( [2008](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Goyal2008) )全面重新审视了学术文献中提出的可作为股权溢价良好预测指标的变量的表现。作者将截至 2022 年更新的数据托管在[Amit Goyal 的网站上。](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://sites.google.com/view/agoyal145)由于数据是存储在公共 Google 驱动器位置上的 XLSX 文件，因此我们需要额外的包来直接从 R 会话访问数据。因此，我们加载`readxl`以读取 XLSX 文件（[Wickham 和 Bryan 2022](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-readxl)）以及`googledrive`Google 驱动器连接（[D'Agostino McGowan 和 Bryan 2021](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-googledrive)）。
+
+```{r}
+library(readxl)
+library(googledrive)
+```
+
+通常，如果您直接在 R 中与 Google Drive 交互，则需要进行身份验证。由于数据是通过公共链接存储的，因此我们可以在没有任何身份验证的情况下继续进行。
+
+```{r}
+drive_deauth()
+```
+
+`drive_download()`包中的功能允许`googledrive`我们下载数据并将其存储在本地。
+
+```{r}
+macro_predictors_link <-
+  "https://docs.google.com/spreadsheets/d/1g4LOaRj4TvwJr9RIaA_nwrXXWTOy46bP"
+
+drive_download(
+  macro_predictors_link,
+  path = "macro_predictors.xlsx"
+)
+```
+
+接下来，我们读入新数据并将列转换为我们稍后使用的变量：
+
+1.  股息价格比 ( `dp`)，即股息对数与价格对数之间的差值，其中股息是标准普尔 500 指数支付的股息的 12 个月移动总和，价格是每日收盘价的月平均值（Campbell[和 Shiller） 1988 年](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Campbell1988)；[坎贝尔和约戈 2006 年](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Campbell2006)）。
+
+2.  股息收益率（`dy`），股息对数与滞后价格对数之间的差（[Ball 1978](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Ball1978)）。
+
+3.  市盈率 ( `ep`)，即盈利对数与价格对数之间的差值，其中盈利是标准普尔 500 指数盈利的 12 个月移动总和（[Campbell 和 Shiller 1988](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Campbell1988)）。
+
+4.  股利支付率 ( `de`)，股利对数与收益对数之间的差值（[Lamont 1998](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Lamont1998)）。
+
+5.  股票方差 ( `svar`)，标准普尔 500 指数日收益平方和（[Guo 2006](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Guo2006)）。
+
+6.  账面市值比 ( `bm`)，道琼斯工业平均指数的账面价值与市值之比（[Kothari 和 Shanken 1997](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Kothari1997)）
+
+7.  净股本扩张 ( `ntis`)，纽约证券交易所上市股票 12 个月移动净发行总额除以纽约证券交易所股票年终总市值的比率（[Campbell、Hilscher 和 Szilagyi 2008](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Campbell2008)）。
+
+8.  国库券 ( `tbl`)，3 个月期国库券：来自圣路易斯联邦储备银行经济研究数据库的二级市场利率（[Campbell 1987](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Campbell1987)）。
+
+9.  长期收益率 ( `lty`)，来自伊博森《股票、债券、票据和通货膨胀年鉴》的长期政府债券收益率（[Welch 和 Goyal 2008](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Goyal2008)）。
+
+10. 长期回报率 ( `ltr`)，来自 Ibbotson 的《股票、债券、票据和通货膨胀年鉴》的长期政府债券回报（[Welch 和 Goyal 2008](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Goyal2008)）。
+
+11. 期限利差（Term Spread `tms`），政府债券和国库券的长期收益率之差（[Campbell 1987](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Campbell1987)）。
+
+12. 违约收益率利差 (Default Yield Spread `dfy`)，BAA 级和 AAA 级公司债券收益率之间的差异（[Fama 和 French 1989](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Fama1989)）。
+
+13. 通货膨胀 ( `infl`)，来自劳工统计局的消费者价格指数（所有城市消费者）（[Campbell 和 Vuolteenaho 2004](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Campbell2004)）。
+
+[有关变量定义和所需的数据转换，您可以查阅Amit Goyal 网站](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://sites.google.com/view/agoyal145)上的材料。
+
+```{r}
+macro_predictors <- read_xlsx(
+  "macro_predictors.xlsx",
+  sheet = "Monthly"
+) |>
+  mutate(month = ym(yyyymm)) |>
+  mutate(across(where(is.character), as.numeric)) |>
+  mutate(
+   IndexDiv = Index + D12,
+   logret = log(IndexDiv) - log(lag(IndexDiv)),
+   Rfree = log(Rfree + 1),
+   rp_div = lead(logret - Rfree, 1), # Future excess market return
+   dp = log(D12) - log(Index), # Dividend Price ratio
+   dy = log(D12) - log(lag(Index)), # Dividend yield
+   ep = log(E12) - log(Index), # Earnings price ratio
+   de = log(D12) - log(E12), # Dividend payout ratio
+   tms = lty - tbl, # Term spread
+   dfy = BAA - AAA # Default yield spread
+  ) |>
+  select(month, rp_div, dp, dy, ep, de, svar,
+   bm = `b/m`, ntis, tbl, lty, ltr,
+   tms, dfy, infl
+  ) |>
+  filter(month >= start_date & month <= end_date) |>
+  drop_na()
+```
+
+最后，将宏观预测变量读入内存后，我们从临时存储中删除原始数据文件。
+
+```{r}
+file.remove("macro_predictors.xlsx")
+```
+
+#### **其他宏观经济数据**
+
+圣路易斯联邦储备银行提供美联储经济数据 (FRED)，这是一个广泛的宏观经济数据数据库。总共有来自 108 个不同来源的 817,000 个美国和国际时间序列。作为说明，我们使用已经熟悉的包来获取可在[CPIAUCNS](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://fred.stlouisfed.org/series/CPIAUCNS)`tidyquant`键下找到的消费者价格指数 (CPI) 数据。
+
+```{r}
+library(tidyquant)
+
+cpi_monthly <- tq_get("CPIAUCNS",
+  get = "economic.data",
+  from = start_date,
+  to = end_date
+) |>
+  mutate(
+   month = floor_date(date, "month"),
+   cpi = price / price[month == max(month)],
+   .keep = "none"
+  )
+```
+
+要下载其他时间序列，我们只需在FRED网站上查找并从地址中提取相应的密钥即可。例如，金矿石的生产者价格指数可以在[PCU2122212122210](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://fred.stlouisfed.org/series/PCU2122212122210)键下找到。该`tidyquant`软件包提供对 FRED 数据库大约 10,000 个时间序列的访问。如果未包含您所需的时间序列，我们建议使用该`fredr`包（[Boysel 和 Vaughan 2021](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-fredr)）。请注意，您需要获取 API 密钥才能使用其功能。我们参考包文档了解详细信息。
+
+#### **设置数据库**
+
+现在我们已经从网络下载了一些（免费提供的）数据到 R 会话的内存中，让我们建立一个数据库来存储这些信息以供将来使用。我们将在接下来的章节中使用存储在该数据库中的数据，但您也可以实施不同的策略并替换相应的代码。
+
+设置和组织数据库的方法有很多种，具体取决于用例。就我们的目的而言，最有效的方法是使用[SQLite](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://www.sqlite.org/)数据库，它是一个 C 语言库，实现了一个小型、快速、独立、高可靠性、功能齐全的 SQL 数据库引擎。请注意，[SQL](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://en.wikipedia.org/wiki/SQL)（结构化查询语言）是一种用于访问和操作数据库的标准语言，并极大地启发了这些`dplyr`功能。我们参考[本教程](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://www.w3schools.com/sql/sql_intro.asp)以获取有关 SQL 的更多信息。
+
+有两个软件包使在 R 中使用 SQLite 变得非常简单：`RSQLite` （[Müller et al. 2022](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-RSQLite)）在 R 中嵌入 SQLite 数据库引擎，`dbplyr` （[Wickham、Girich 和 Ruiz 2022](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-dbplyr)）是`dplyr`. 这些包允许建立一个数据库来远程存储表，并通过自动转换`dplyr`为 SQL 来使用这些远程数据库表，就好像它们是内存中的数据帧一样。查看[`RSQLite`](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://cran.r-project.org/web/packages/RSQLite/vignettes/RSQLite.html)和[`dbplyr`](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://db.rstudio.com/databases/sqlite/)小插图以获取更多信息。
+
+```{r}
+library(RSQLite)
+library(dbplyr)
+```
+
+SQLite 数据库很容易创建 - 下面的代码实际上就是全部。您不需要任何外部软件。请注意，我们`extended_types=TRUE`在存储和获取数据时使用该选项来启用日期类型。否则，日期列将作为整数存储和检索。`tidy_finance_r.sqlite`我们将在所有后续章节中使用子文件夹中的结果文件`data`来检索数据。
+
+```{r}
+tidy_finance <- dbConnect(
+ SQLite(),
+ "data/tidy_finance_r.sqlite",
+ extended_types = TRUE
+)
+```
+
+接下来，我们使用每月 Fama-French 因子数据创建一个远程表。我们使用函数 来完成此操作`dbWriteTable()`，它将数据复制到我们的 SQLite 数据库。
+
+```{r}
+dbWriteTable(tidy_finance,
+  "factors_ff3_monthly",
+  value = factors_ff3_monthly,
+  overwrite = TRUE
+)
+```
+
+我们可以通过建立连接来将远程表用作内存中的数据帧`tbl()`。
+
+```{r}
+factors_ff3_monthly_db <- tbl(tidy_finance, "factors_ff3_monthly")
+```
+
+所有`dplyr`调用都是惰性评估的，即数据不在我们的 R 会话的内存中，并且数据库完成了大部分工作。您可以注意到下面的输出没有显示行数。事实上，以下代码块仅从数据库中获取前 10 行进行打印。
+
+```{r}
+factors_ff3_monthly_db |>
+  select(month, rf)
+```
+
+``` R
+# Source:   SQL [?? x 2]
+# Database: sqlite 3.41.2 [data/tidy_finance_r.sqlite]
+  month          rf
+  <date>      <dbl>
+1 1960-01-01 0.0033
+2 1960-02-01 0.0029
+3 1960-03-01 0.0035
+4 1960-04-01 0.0019
+5 1960-05-01 0.0027
+# ℹ more rows
+```
+
+如果我们想将整个表保存在内存中，我们就需要`collect()`它。您将在接下来的章节中看到我们定期将数据加载到内存中。
+
+```{r}
+factors_ff3_monthly_db |>
+  select(month, rf) |>
+  collect()
+# A tibble: 756 × 2
+  month          rf
+  <date>      <dbl>
+1 1960-01-01 0.0033
+2 1960-02-01 0.0029
+3 1960-03-01 0.0035
+4 1960-04-01 0.0019
+5 1960-05-01 0.0027
+# ℹ 751 more rows
+```
+
+最后几个代码块实际上是组织一个简单数据库的全部内容！您还可以跨设备和编程语言共享 SQLite 数据库。
+
+在继续处理下一个数据源之前，让我们将其他五个表存储在新的 SQLite 数据库中。
+
+```{r}
+dbWriteTable(tidy_finance,
+  "factors_ff5_monthly",
+  value = factors_ff5_monthly,
+  overwrite = TRUE
+)
+
+dbWriteTable(tidy_finance,
+  "factors_ff3_daily",
+  value = factors_ff3_daily,
+  overwrite = TRUE
+)
+
+dbWriteTable(tidy_finance,
+  "industries_ff_monthly",
+  value = industries_ff_monthly,
+  overwrite = TRUE
+)
+
+dbWriteTable(tidy_finance,
+  "factors_q_monthly",
+  value = factors_q_monthly,
+  overwrite = TRUE
+)
+
+dbWriteTable(tidy_finance,
+  "macro_predictors",
+  value = macro_predictors,
+  overwrite = TRUE
+)
+
+dbWriteTable(tidy_finance,
+  "cpi_monthly",
+  value = cpi_monthly,
+  overwrite = TRUE
+)
+```
+
+从现在开始，要访问存储在数据库中的数据，您只需执行三个步骤：(i) 建立与 SQLite 数据库的连接，(ii) 调用要提取的表，以及 (iii)收集数据。为了您的方便，以下步骤以紧凑的方式展示了您所需的一切。
+
+```{r}
+library(tidyverse)
+library(RSQLite)
+
+tidy_finance <- dbConnect(
+  SQLite(),
+  "data/tidy_finance_r.sqlite",
+  extended_types = TRUE
+)
+
+factors_q_monthly <- tbl(tidy_finance, "factors_q_monthly")
+factors_q_monthly <- factors_q_monthly |> collect()
+```
+
+#### **管理 SQLite 数据库**
+
+最后，在数据章节的最后，我们重新审视 SQLite 数据库本身。当您删除表等数据库对象或从表中删除数据时，数据库文件大小保持不变，因为 SQLite 只是将删除的对象标记为空闲并保留其空间以供将来使用。结果，数据库文件的大小总是增大。
+
+要优化数据库文件，您可以`VACUUM`在数据库中运行该命令，该命令会重建数据库并释放未使用的空间。您可以使用该函数在数据库中执行该命令`dbSendQuery()`。
+
+```{r}
+res <- dbSendQuery(tidy_finance, "VACUUM")
+res
+<SQLiteResult>
+  SQL  VACUUM
+  ROWS Fetched: 0 [complete]
+       Changed: 0
+```
+
+该`VACUUM`命令实际上执行了几个额外的清理步骤，您可以在[本教程中阅读这些步骤。](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://www.sqlitetutorial.net/sqlite-vacuum/)
+
+我们存储上述查询的结果是`res`因为数据库保持结果集打开。要关闭打开的结果并避免继续出现警告，我们可以使用`dbClearResult()`.
+
+```{r}
+dbClearResult(res)
+```
+
+除了清理之外，您可能还对列出数据库中当前的所有表感兴趣。您可以通过该`dbListTables()`功能来完成此操作。
+
+```{r}
+dbListTables(tidy_finance)
+ [1] "beta"                  "compustat"            
+ [3] "cpi_monthly"           "crsp_daily"           
+ [5] "crsp_monthly"          "factors_ff3_daily"    
+ [7] "factors_ff3_monthly"   "factors_ff5_monthly"  
+ [9] "factors_q_monthly"     "fisd"                 
+[11] "industries_ff_monthly" "macro_predictors"     
+[13] "trace_enhanced"       
+```
+
+### **2.3 WRDS, CRSP, and Compustat**
+
+本章介绍如何连接到[沃顿研究数据服务 (WRDS)](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://wrds-www.wharton.upenn.edu/)，这是一个流行的研究应用金融和经济数据提供商。我们使用此连接下载最常用的股票和公司特征数据、CRSP 和 Compustat。不幸的是，这些数据不是免费提供的，但大多数学生和研究人员通常可以通过大学图书馆访问 WRDS。假设您有权访问 WRDS，我们将向您展示如何准备和合并数据库并将它们存储在`SQLite`上一章介绍的数据库中。我们通过提供一些使用 WRDS 数据库的技巧来结束本章。
+
+如果您无权访问 WRDS，但仍想运行本书中的代码，请参阅我们的博客文章《[Dummy Data for Tidy Finance Readers without Access to WRDS》](https://www-tidy--finance-org.translate.goog/blog/tidy-finance-dummy-data/?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)，其中展示了如何创建一个包含以下内容的虚拟数据库： WRDS 表和相应的列，以便本书中的所有代码块都可以使用这个虚拟数据库执行。
+
+首先，我们加载本章中使用的 R 包。稍后，我们在需要的部分加载更多包。
+
+```{r}
+library(tidyverse)
+library(scales)
+library(RSQLite)
+library(dbplyr)
+```
+
+我们使用与前一章相同的日期范围以确保一致性。
+
+```{r}
+start_date <- ymd("1960-01-01")
+end_date <- ymd("2022-12-31")
+```
+
+#### **访问 WRDS**
+
+WRDS 是学术环境中使用最广泛的资产和公司特定财务数据来源。WRDS 是一个数据平台，提供数据验证、灵活的交付选项以及对许多不同数据源的访问。WRDS 中的数据也组织在 SQL 数据库中，尽管它们使用[PostgreSQL](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://www.postgresql.org/)引擎。该数据库引擎与 R 和 SQLite 一样易于处理。我们使用该`RPostgres`包建立与 WRDS 数据库的连接（[Wickham、Ooms 和 Müller 2022](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-RPostgres)）。请注意，您还可以使用该`odbc`包连接到 PostgreSQL 数据库，但是您需要自己安装适当的驱动程序。`RPostgres`已经包含合适的驱动程序。
+
+```{r}
+library(RPostgres)
+```
+
+要建立连接，请使用`dbConnect()`带有以下参数的函数。请注意，您需要将`WRDS_USER`和`WRDS_PASSWORD`参数替换为您自己的凭据。我们出于本书的目的定义了环境变量，因为我们显然不希望（也不允许）与世界其他地方共享我们的凭据（这些环境变量存储在`.Renviron`我们项目目录中的 -file 中，并使用`Sys.getenv()`功能）。
+
+`PostgreSQL`此外，自 2023 年 5 月起，在建立远程连接或其他远程连接时，您必须使用多重（即两因素）身份验证。您有两种选择来提供额外的身份证明。首先，如果您的 WRDS 帐户启用了 Duo Push，当您尝试使用以下代码建立连接时，您将在手机上收到推送通知。接受通知后，您可以继续工作。其次，您可以使用您的用户名和相同的 IP 地址登录需要多重身份验证的 WRDS 网站。一旦您在网站上成功识别自己的身份，您的用户名-IP 组合将被记住 30 天，您可以轻松使用下面的远程连接。
+
+```{r}
+wrds <- dbConnect(
+  Postgres(),
+  host = "wrds-pgdata.wharton.upenn.edu",
+  dbname = "wrds",
+  port = 9737,
+  sslmode = "require",
+  user = Sys.getenv("WRDS_USER"),
+  password = Sys.getenv("WRDS_PASSWORD")
+)
+```
+
+WRDS 的远程连接非常有用。然而，数据库本身包含许多不同的表。您可以检查 WRDS 主页来识别您要查找的表的名称（如果您超出了我们的说明范围）。或者，您也可以使用函数查询数据结构`dbSendQuery()`。如果您有兴趣，下面有一个基于 WRDS 教程[\"使用 R 查询 WRDS 数据\"的练习。](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://wrds-www.wharton.upenn.edu/pages/support/programming-wrds/programming-r/querying-wrds-data-r/)此外，本章的倒数第二部分展示了如何研究数据库的结构。
+
+#### **下载并准备 CRSP**
+
+[证券价格研究中心 (CRSP)](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://crsp.org/)提供最广泛使用的美国股票数据。我们使用`wrds`刚刚创建的连接对象来首先访问每月 CRSP 返回数据。实际上，我们需要三个表来获取所需的数据：（i）CRSP 每月安全文件，
+
+```{r}
+msf_db <- tbl(wrds, in_schema("crsp", "msf"))
+```
+
+1.  识别信息，
+
+```{r}
+msenames_db <- tbl(wrds, in_schema("crsp", "msenames"))
+```
+
+(iii) 退市信息。
+
+```{r}
+msedelist_db <- tbl(wrds, in_schema("crsp", "msedelist"))
+```
+
+我们使用三个远程表来获取我们想要放入本地数据库的数据。如上所述，我们的想法是让 WRDS 数据库完成所有工作，只下载我们实际需要的数据。我们应用通用过滤器和数据选择标准来缩小我们感兴趣的数据范围：(i) 我们仅保留感兴趣时间窗口内的数据，(ii) 我们仅保留通过股票代码`shrcd`10 和 11 识别的美国上市股票，以及(iii) 我们仅保留 permno 特定开始日期`namedt`和结束日期内的月份`nameendt`。此外，我们还添加了退市代码和退货。您可以阅读Bali、Engle 和 Murray（[2016](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-BaliEngleMurray2016)）的伟大教科书，以获取有关我们在下面的代码中应用的过滤器的广泛讨论。
+
+```{r}
+crsp_monthly <- msf_db |>
+ filter(date >= start_date & date <= end_date) |>
+ inner_join(
+  msenames_db |>
+   filter(shrcd %in% c(10, 11)) |>
+   select(permno, exchcd, siccd, namedt, nameendt),
+  join_by(permno)
+  ) |>
+ filter(date >= namedt & date <= nameendt) |>
+ mutate(month = floor_date(date, "month")) |>
+ left_join(
+  msedelist_db |>
+   select(permno, dlstdt, dlret, dlstcd) |>
+   mutate(month = floor_date(dlstdt, "month")),
+  join_by(permno, month)
+  ) |>
+ select(
+  permno, # Security identifier
+  date, # Date of the observation
+  month, # Month of the observation
+  ret, # Return
+  shrout, # Shares outstanding (in thousands)
+  altprc, # Last traded price in a month
+  exchcd, # Exchange code
+  siccd, # Industry code
+  dlret, # Delisting return
+  dlstcd # Delisting code
+  ) |>
+ collect() |>
+ mutate(
+  month = ymd(month),
+  shrout = shrout * 1000
+  )
+```
+
+现在，我们已将所有相关的月度回报数据存储在内存中，并继续为将来的分析准备数据。我们在当前阶段执行准备步骤，因为我们希望避免每次在后续章节中使用数据时都执行相同的突变。
+
+我们创建的第一个附加变量是市值 ( `mktcap`)，它是流通股数量`shrout`与一个月内最后交易价格的乘积`altprc`。请注意，与 回报 相比`ret`，这两个变量不会针对股票分割等任何公司行为进行事后调整。此外，`altprc`只要最后交易价格不存在，则 为负，CRSP 决定报告最后可用订单簿的中间报价。因此，我们取市值的绝对值。为了方便起见，我们还将市值保留为数百万美元，因为我们不想在图表中打印大量数字。此外，我们将零市值设置为缺失，因为这在概念上没有什么意义（即公司将破产）。
+
+```{r}
+crsp_monthly <- crsp_monthly |>
+ mutate(
+  mktcap = abs(shrout * altprc) / 10^6,
+  mktcap = na_if(mktcap, 0)
+  )
+```
+
+我们经常使用的下一个变量是一个月*滞后*市值。正如我们在后面的章节中演示的那样，滞后市值通常用于计算价值加权投资组合回报。添加具有滞后市值值的列的最简单且一致的方法是为每个观察添加一个月，然后将信息加入到我们的每月 CRSP 数据中。
+
+```{r}
+mktcap_lag <- crsp_monthly |>
+ mutate(month = month %m+% months(1)) |>
+ select(permno, month, mktcap_lag = mktcap)
+crsp_monthly <- crsp_monthly |>
+ left_join(mktcap_lag, join_by(permno, month))
+```
+
+如果您想知道为什么我们不使用该`lag()`函数，例如 via `crsp_monthly |> group_by(permno) |> mutate(mktcap_lag = lag(mktcap))`，请查看练习。（**会把10000的市值赋给10001**）
+
+接下来，我们跟随Bali、Engle 和 Murray（[2016](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-BaliEngleMurray2016)）将上市交易所代码转换为明确的交易所名称。
+
+```{r}
+crsp_monthly <- crsp_monthly |>
+ mutate(exchange = case_when(
+  exchcd %in% c(1, 31) ~ "NYSE",
+  exchcd %in% c(2, 32) ~ "AMEX",
+  exchcd %in% c(3, 33) ~ "NASDAQ",
+  .default = "Other"
+  ))
+```
+
+同样，我们遵循Bali、Engle 和 Murray（[2016](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-BaliEngleMurray2016)）将行业代码转换为行业描述。请注意，还有其他常用的行业分类（例如[Fama 和 French 1997](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-FamaFrench1997)） 。
+
+```{r}
+crsp_monthly <- crsp_monthly |>
+ mutate(industry = case_when(
+  siccd >= 1 & siccd <= 999 ~ "Agriculture",
+  siccd >= 1000 & siccd <= 1499 ~ "Mining",
+  siccd >= 1500 & siccd <= 1799 ~ "Construction",
+  siccd >= 2000 & siccd <= 3999 ~ "Manufacturing",
+  siccd >= 4000 & siccd <= 4899 ~ "Transportation",
+  siccd >= 4900 & siccd <= 4999 ~ "Utilities",
+  siccd >= 5000 & siccd <= 5199 ~ "Wholesale",
+  siccd >= 5200 & siccd <= 5999 ~ "Retail",
+  siccd >= 6000 & siccd <= 6799 ~ "Finance",
+  siccd >= 7000 & siccd <= 8999 ~ "Services",
+  siccd >= 9000 & siccd <= 9999 ~ "Public",
+  TRUE ~ "Missing"
+  ))
+```
+
+我们还构建了根据Bali、Engle 和 Murray（[2016](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-BaliEngleMurray2016)）所述的退市调整后的回报。当公司停止运营、宣布破产、合并、不符合上市要求或寻求私有化时，通常会导致证券退市。此次调整试图反映在退市前一个月买入该股票并持有至退市之日的投资者的回报。经过这样的改造，我们就可以去掉退市退货和退市代码了。
+
+```{r}
+crsp_monthly <- crsp_monthly |>
+ mutate(ret_adj = case_when(
+  is.na(dlstcd) ~ ret,
+  !is.na(dlstcd) & !is.na(dlret) ~ dlret,
+  dlstcd %in% c(500, 520, 580, 584) |
+    (dlstcd >= 551 & dlstcd <= 574) ~ -0.30,
+  dlstcd == 100 ~ ret,
+  TRUE ~ -1
+  )) |>
+ select(-c(dlret, dlstcd))
+```
+
+接下来，我们通过减去 Fama-French 数据提供的每月无风险利率来计算超额收益。由于我们所有的分析都基于超额收益，因此我们可以从我们的标题中删除调整后的收益和无风险利率。请注意，我们确保超额收益的界限是 -1，因为小于 -100% 的收益从概念上讲是没有意义的。在调整回报之前，我们必须连接到数据库并加载表`factors_ff3_monthly`。
+
+```{r}
+tidy_finance <- dbConnect(
+ SQLite(),
+ "data/tidy_finance_r.sqlite",
+  extended_types = TRUE
+)
+
+factors_ff3_monthly <- tbl(tidy_finance, "factors_ff3_monthly") |>
+ select(month, rf) |>
+ collect()
+
+crsp_monthly <- crsp_monthly |>
+ left_join(factors_ff3_monthly,
+  join_by(month)
+  ) |>
+ mutate(
+  ret_excess = ret_adj - rf,
+  ret_excess = pmax(ret_excess, -1)
+  ) |>
+ select(-ret_adj, -rf)
+```
+
+由于超额回报和市值对于我们的所有分析都至关重要，因此我们可以安全地排除所有缺少回报或市值的观察结果。
+
+```{r}
+crsp_monthly <- crsp_monthly |>
+ drop_na(ret_excess, mktcap, mktcap_lag)
+```
+
+最后，我们将每月的 CRSP 文件存储在数据库中。
+
+```{r}
+dbWriteTable(tidy_finance,
+ "crsp_monthly",
+ value = crsp_monthly,
+ overwrite = TRUE
+)
+```
+
+#### **CRSP 样本初览**
+
+在我们继续讨论其他数据源之前，让我们看一下 CRSP 样本的一些描述性统计数据，这是我们股票收益的主要来源。
+
+[图 1](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-211)显示了上市交易所随时间变化的每月证券数量。从数据来看，纽约证券交易所的历史最长，但纳斯达克上市的股票数量相当多。过去几十年来，在美国证券交易所上市的股票数量稳步下降。截至 2022 年底，在纳斯达克主要上市的股票有 2,778 只，在纽约证券交易所上市的股票有 1,358 只，在美国证券交易所上市的股票有 162 只，只有一只属于其他类别。
+
+```{r}
+crsp_monthly |>
+  count(exchange, date) |>
+  ggplot(aes(x = date, y = n, color = exchange, linetype = exchange)) +
+  geom_line() +
+  labs(
+    x = NULL, y = NULL, color = NULL, linetype = NULL,
+    title = "Monthly number of securities by listing exchange"
+  ) +
+  scale_x_date(date_breaks = "10 years", date_labels = "%Y") +
+  scale_y_continuous(labels = comma)
+```
+
+![](https://www.tidy-finance.org/r/wrds-crsp-and-compustat_files/figure-html/fig-211-1.png){width="561"}
+
+图 1：CRSP 样本中在美国各交易所上市的股票数量。
+
+[接下来，我们看看图 2](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-212)中按各个上市交易所分组的总市值。为了确保我们看到随时间推移具有可比性的有意义的数据，我们调整了通货膨胀的名义值。事实上，我们可以使用数据库中已有的表格来计算总市值，方法是列出交易所并将其绘制出来，就像它们在内存中一样。[图 2](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-212)中的所有值均以 2022 年末美元计算，以确保跨期可比性。纽约证券交易所上市的股票迄今为止市值最大，其次是纳斯达克上市的股票。
+
+```{r}
+tbl(tidy_finance, "crsp_monthly") |>
+  left_join(tbl(tidy_finance, "cpi_monthly"), join_by(month)) |>
+  group_by(month, exchange) |>
+  summarize(
+    mktcap = sum(mktcap, na.rm = TRUE) / cpi,
+    .groups = "drop"
+  ) |>
+  collect() |>
+  mutate(month = ymd(month)) |>
+  ggplot(aes(
+    x = month, y = mktcap / 1000,
+    color = exchange, linetype = exchange
+  )) +
+  geom_line() +
+  labs(
+    x = NULL, y = NULL, color = NULL, linetype = NULL,
+    title = "Monthly market cap by listing exchange in billions of Dec 2022 USD"
+  ) +
+  scale_x_date(date_breaks = "10 years", date_labels = "%Y") +
+  scale_y_continuous(labels = comma)
+```
+
+![](https://www.tidy-finance.org/r/wrds-crsp-and-compustat_files/figure-html/fig-212-1.png)
+
+图 2：市值以十亿美元为单位，根据消费者价格指数变化进行调整，横轴上的值反映了 2022 年 12 月十亿美元的购买力。
+
+当然，在数据库中执行计算并没有真正的意义，因为我们可以轻松地将所有需要的数据拉入内存。上面的代码块比在内存中的表上执行相同的步骤要慢。然而，我们只是想说明，在将数据加载到内存中之前，您可以在数据库中执行许多操作。在继续之前，我们加载每月 CPI 数据。
+
+```{r}
+cpi_monthly <- tbl(tidy_finance, "cpi_monthly") |>
+ collect()
+```
+
+接下来，我们按行业查看相同的描述性统计数据。[图 3](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-213)绘制了每个 SIC 行业分类样本中的股票数量。在样本期间的大部分时间里，最大的股票份额是制造业，尽管该数字在 90 年代某个时候达到顶峰。与公共管理相关的企业数量似乎是近年来唯一增长的类别，甚至在我们的样本期结束时超过了制造业。
+
+```{r}
+crsp_monthly_industry <- crsp_monthly |>
+  left_join(cpi_monthly, join_by(month)) |>
+  group_by(month, industry) |>
+  summarize(
+   securities = n_distinct(permno),
+   mktcap = sum(mktcap) / mean(cpi),
+   .groups = "drop"
+  )
+
+crsp_monthly_industry |>
+  ggplot(aes(
+   x = month,
+   y = securities,
+   color = industry,
+   linetype = industry
+  )) +
+  geom_line() +
+  labs(
+   x = NULL, y = NULL, color = NULL, linetype = NULL,
+   title = "Monthly number of securities by industry"
+  ) +
+  scale_x_date(date_breaks = "10 years", date_labels = "%Y") +
+  scale_y_continuous(labels = comma)
+```
+
+![](https://www.tidy-finance.org/r/wrds-crsp-and-compustat_files/figure-html/fig-213-1.png){width="619"}
+
+图 3：CRSP 样本中与不同行业相关的股票数量。
+
+我们还计算了属于各自行业的所有股票的市值，并在[图 4](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-214)中显示了随时间的演变。截至 2022 年底，所有价值均以数十亿美元计算。在任何时候，制造企业都占市值的最大部分。然而，在样本接近尾声时，金融公司和服务业开始占据市值的很大一部分。
+
+```{r}
+crsp_monthly_industry |>
+  ggplot(aes(
+   x = month,
+   y = mktcap / 1000,
+   color = industry,
+   linetype = industry
+  )) +
+  geom_line() +
+  labs(
+   x = NULL, y = NULL, color = NULL, linetype = NULL,
+   title = "Monthly total market cap by industry in billions as of Dec 2022 USD"
+  ) +
+  scale_x_date(date_breaks = "10 years", date_labels = "%Y") +
+  scale_y_continuous(labels = comma)
+```
+
+![](https://www.tidy-finance.org/r/wrds-crsp-and-compustat_files/figure-html/fig-214-1.png){width="621"}
+
+图 4：市值以十亿美元为单位，根据消费者价格指数变化进行调整，以便 y 轴上的值反映 2022 年 12 月十亿美元的购买力。
+
+#### **每日 CRSP 数据**
+
+在我们讨论会计数据之前，我们提供了下载每日 CRSP 数据的建议。虽然上面的每月数据通常适合您的记忆，并且可以在有意义的时间内下载，但对于每日回报数据来说通常并非如此。每日 CRSP 数据文件比每月数据大得多，可以超过 20GB。这有两个重要的含义：您无法将所有每日返回数据保存在内存中（因此不可能将整个数据集复制到本地数据库），并且根据我们的经验，下载通常会崩溃（或永远不会停止），因为对于 WRDS 云来说，准备并发送到 R 会话的数据太多。
+
+这个挑战有一个解决方案。与许多*大数据*问题一样，您可以将大任务拆分为多个更易于处理的较小任务。也就是说，不是一次性下载所有股票的数据，而是小批量连续下载股票的数据。此类操作可以在循环中实现`for()`，我们在每次迭代中下载、准备和存储少量股票的数据。不过，此操作可能需要大约 5 分钟，具体取决于您的互联网连接。为了跟踪进度，我们使用创建临时进度更新`cat()`。请注意，当我们处理第二批和所有后续批次时，我们还使用此处的函数`dbWriteTable()`以及将新数据附加到现有表的选项。
+
+另请注意，我们调整退市回报的方式与每月回报不同：
+
+1.  如果 CRSP 中每天记录退市日期的回报`dlstdt`，那么我们将其替换为退市回报`dlret`。
+
+2.  如果 CRSP 中每日没有记录现有除牌日期的回报，那么我们将添加一个包含除牌回报的新行。
+
+3.  `dlstdt`我们确保最终表中不会保留退市日期之后的回报。
+
+```{r}
+dsf_db <- tbl(wrds, in_schema("crsp", "dsf"))
+
+factors_ff3_daily <- tbl(tidy_finance, "factors_ff3_daily") |>
+  collect()
+
+permnos <- tbl(tidy_finance, "crsp_monthly") |>
+  distinct(permno) |>
+  pull()
+
+batch_size <- 500
+batches <- ceiling(length(permnos) / batch_size)
+
+for (j in 1:batches) {
+  
+  permno_batch <- permnos[
+    ((j - 1) * batch_size + 1):min(j * batch_size, length(permnos))
+  ]
+
+  crsp_daily_sub <- dsf_db |>
+    filter(permno %in% permno_batch &
+             date >= start_date & date <= end_date) |>
+    select(permno, date, ret) |>
+    collect() |>
+    drop_na()
+
+  if (nrow(crsp_daily_sub) > 0) {
+    
+    msedelist_sub <- msedelist_db |> 
+    filter(permno %in% permno_batch) |> 
+    select(permno, dlstdt, dlret) |> 
+    collect() |>
+    drop_na()
+    
+    crsp_daily_sub <- crsp_daily_sub |> 
+      left_join(msedelist_sub, join_by(permno, date == dlstdt)) |> 
+      bind_rows(msedelist_sub |> 
+                  anti_join(crsp_daily_sub, 
+                            join_by(permno, dlstdt == date))) |> 
+      mutate(ret = if_else(!is.na(dlret), dlret, ret),
+             date = if_else(!is.na(dlstdt), dlstdt, date)) |> 
+      select(-c(dlret, dlstdt)) |> 
+      left_join(msedelist_sub |> 
+                  select(permno, dlstdt), join_by(permno)) |> 
+      mutate(dlstdt = replace_na(dlstdt, end_date)) |> 
+      filter(date <= dlstdt) |> 
+      select(-dlstdt)
+    
+    crsp_daily_sub <- crsp_daily_sub |>
+      mutate(month = floor_date(date, "month")) |>
+      left_join(factors_ff3_daily |>
+        select(date, rf), join_by(date)) |>
+      mutate(
+        ret_excess = ret - rf,
+        ret_excess = pmax(ret_excess, -1)
+      ) |>
+      select(permno, date, month, ret, ret_excess)
+
+    dbWriteTable(tidy_finance,
+      "crsp_daily",
+      value = crsp_daily_sub,
+      overwrite = ifelse(j == 1, TRUE, FALSE),
+      append = ifelse(j != 1, TRUE, FALSE)
+    )
+  }
+
+  cat("Batch", j, "out of", batches, "done (", percent(j / batches), ")\n")
+}
+```
+
+最终，我们获得了超过 7100 万行的每日返回数据。请注意，我们只存储我们实际需要的识别信息，即`permno`、`date`和`month`以及超额收益。因此，我们确保本地数据库仅包含我们实际使用的数据。
+
+#### **准备 Compustat 数据**
+
+公司会计数据是我们在后续章节的投资组合分析中使用的重要信息来源。公司财务信息的常用来源是[S&P Global Market Intelligence 提供的 Compustat，](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://www.spglobal.com/marketintelligence/en/)该公司是一家全球数据供应商，提供全球活跃和不活跃公司的财务、统计和市场信息。对于美国和加拿大公司，年度历史记录可以追溯到 1950 年，季度和月度历史记录可以追溯到 1962 年。
+
+要访问 Compustat 数据，我们可以再次点击 WRDS，该表托管`funda`包含北美公司年度公司级信息的表。
+
+```{r}
+funda_db <- tbl(wrds, in_schema("comp", "funda"))
+```
+
+我们遵循典型的过滤器约定，仅提取我们实际需要的数据：（i）我们仅获取工业数据格式的记录，（ii）标准格式（即标准表示形式的综合信息），以及（iii）仅数据在所需的时间窗口内。
+
+```{r}
+compustat <- funda_db |>
+  filter(
+    indfmt == "INDL" &
+      datafmt == "STD" &
+      consol == "C" &
+      datadate >= start_date & datadate <= end_date
+  ) |>
+  select(
+    gvkey, # Firm identifier
+    datadate, # Date of the accounting data
+    seq, # Stockholders' equity
+    ceq, # Total common/ordinary equity
+    at, # Total assets
+    lt, # Total liabilities
+    txditc, # Deferred taxes and investment tax credit
+    txdb, # Deferred taxes
+    itcb, # Investment tax credit
+    pstkrv, # Preferred stock redemption value
+    pstkl, # Preferred stock liquidating value
+    pstk, # Preferred stock par value
+    capx, # Capital investment
+    oancf, # Operating cash flow
+    sale,  # Revenue
+    cogs, # Costs of goods sold
+    xint, # Interest expense
+    xsga # Selling, general, and administrative expenses
+  ) |>
+  collect()
+```
+
+接下来，我们根据[Ken French 数据库中的变量定义](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/Data_Library/variable_definitions.html)计算优先股和股权的账面价值`be`以及营业利润。请注意，我们将负股本或零股本设置为缺失，这是处理账面市值比时的常见做法（有关详细信息，请参阅[Fama 和 French 1992](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Fama1992) ） 。`op`
+
+```{r}
+compustat <- compustat |>
+  mutate(
+    be = coalesce(seq, ceq + pstk, at - lt) +
+      coalesce(txditc, txdb + itcb, 0) -
+      coalesce(pstkrv, pstkl, pstk, 0),
+    be = if_else(be <= 0, NA, be),
+    op = (sale - coalesce(cogs, 0) - 
+            coalesce(xsga, 0) - coalesce(xint, 0)) / be,
+  )
+```
+
+我们只保留每个公司年份组的最新可用信息。请注意，`datadate`定义了相应财务数据所指的时间（例如，截至 2022 年 12 月 31 日的年度报告）。因此，`datadate`这不是向公众提供数据的日期。查看练习以更深入地了解 的特性`datadate`。
+
+```{r}
+compustat <- compustat |>
+  mutate(year = year(datadate)) |>
+  group_by(gvkey, year) |>
+  filter(datadate == max(datadate)) |>
+  ungroup()
+```
+
+我们还根据 Ken French 的变量定义计算投资比率`inv`，即总资产从一个会计年度到另一个会计年度的变化。请注意，我们再次使用上面 CRSP 数据引入的连接方法来构建滞后资产。
+
+```{r}
+compustat <- compustat |> 
+  left_join(
+    compustat |> 
+      select(gvkey, year, at_lag = at) |> 
+      mutate(year = year + 1), 
+    join_by(gvkey, year)
+  ) |> 
+  mutate(
+    inv = at / at_lag - 1,
+    inv = if_else(at_lag <= 0, NA, inv)
+  )
+```
+
+通过最后一步，我们已经完成了坚实的基础准备。因此，我们可以将它们存储在本地数据库中。
+
+```{r}
+dbWriteTable(tidy_finance,
+  "compustat",
+  value = compustat,
+  overwrite = TRUE
+)
+```
+
+#### **将 CRSP 与 Compustat 合并**
+
+不幸的是，CRSP 和 Compustat 使用不同的密钥来识别股票和公司。CRSP 用于`permno`股票，而 Compustat 用于`gvkey`识别公司。幸运的是，WRDS 上的精选匹配表允许我们合并 CRSP 和 Compustat，因此我们创建到*CRSP-Compustat 合并*表（由 CRSP 提供）的连接。
+
+```{r}
+ccmxpf_linktable_db <- tbl(
+  wrds,
+  in_schema("crsp", "ccmxpf_linktable")
+)
+```
+
+链接表包含来自各种方法的 CRSP 和 Compustat 标识符之间的链接。然而，我们需要确保只保留相关且正确的链接，再次遵循Bali、Engle 和 Murray ( [2016](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-BaliEngleMurray2016) )中概述的描述。另请注意，当前活动链接没有结束日期，因此我们只需通过 输入当前日期`today()`。
+
+```{r}
+ccmxpf_linktable <- ccmxpf_linktable_db |>  filter(linktype %in% c("LU", "LC") &   linkprim %in% c("P", "C") &   usedflag == 1) |>  select(permno = lpermno, gvkey, linkdt, linkenddt) |>  collect() |>  mutate(linkenddt = replace_na(linkenddt, today()))
+```
+
+我们使用这些链接创建一个新表，其中包含股票标识符、公司标识符和月份之间的映射。然后，我们将这些 Compustat 链接添加`gvkey`到我们的每月股票数据中。
+
+```{r}
+ccm_links <- crsp_monthly |>
+  inner_join(ccmxpf_linktable, 
+             join_by(permno), relationship = "many-to-many") |>
+  filter(!is.na(gvkey) & 
+           (date >= linkdt & date <= linkenddt)) |>
+  select(permno, gvkey, date)
+
+crsp_monthly <- crsp_monthly |>
+  left_join(ccm_links, join_by(permno, date))
+```
+
+最后一步，我们使用本地数据库中的链接信息更新之前准备的每月 CRSP 文件。
+
+```{r}
+dbWriteTable(tidy_finance,
+  "crsp_monthly",
+  value = crsp_monthly,
+  overwrite = TRUE
+)
+```
+
+在结束本章之前，让我们看一下一个有趣的数据描述性统计数据。由于股权账面价值在许多资产定价应用中起着至关重要的作用，因此了解我们有多少股票可以使用此信息是很有趣的。因此，[图 5](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-215)绘制了每个交易所账面权益价值的证券份额。事实证明，20 世纪 60 年代在 AMEX 和 NYSE 上市的股票的覆盖率相当糟糕，但此后的所有时期都徘徊在 80% 左右。我们可以忽略属于其他类别的证券的不稳定覆盖范围，因为在我们的样本中无论如何只有少数证券。
+
+```{r}
+crsp_monthly |>
+  group_by(permno, year = year(month)) |>
+  filter(date == max(date)) |>
+  ungroup() |>
+  left_join(compustat, join_by(gvkey, year)) |>
+  group_by(exchange, year) |>
+  summarize(
+    share = n_distinct(permno[!is.na(be)]) / n_distinct(permno),
+    .groups = "drop"
+  ) |>
+  ggplot(aes(
+    x = year, 
+    y = share, 
+    color = exchange,
+    linetype = exchange
+    )) +
+  geom_line() +
+  labs(
+    x = NULL, y = NULL, color = NULL, linetype = NULL,
+    title = "Share of securities with book equity values by exchange"
+  ) +
+  scale_y_continuous(labels = percent) +
+  coord_cartesian(ylim = c(0, 1))
+```
+
+![](https://www.tidy-finance.org/r/wrds-crsp-and-compustat_files/figure-html/fig-215-1.png){width="595"}
+
+图 5：按上市交易所划分的年末账面权益证券份额。
+
+#### **PostgreSQL 数据库的一些技巧**
+
+正如我们上面提到的，WRDS 数据库运行在 PostgreSQL 而不是 SQLite 上。在 WRDS PostgreSQL 实例中找到适合您的数据需求的表可能很棘手，因为表是按架构组织的。如果您想知道模式的用途是什么，请查看[此文档。](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://www.postgresql.org/docs/9.1/ddl-schemas.html)例如，如果您想查找`crsp`架构中的所有表，您可以运行
+
+```{r}
+dbListObjects(wrds, Id(schema = "crsp"))
+```
+
+此操作返回属于 WRDS 上该族的所有表的列表`crsp`，例如`<Id> schema = crsp, table = msenames`。`comp`同样，您可以通过以下方式获取属于该系列的所有表的列表
+
+```{r}
+dbListObjects(wrds, Id(schema = "comp"))
+```
+
+如果您想获取所有模式，请运行
+
+```{r}
+dbListObjects(wrds)
+```

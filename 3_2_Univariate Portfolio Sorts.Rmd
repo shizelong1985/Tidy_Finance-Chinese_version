@@ -1,0 +1,316 @@
+---
+title: "3_2_Univariate Portfolio Sorts"
+author: "Wenqiang Li"
+date: "2024-02-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+在本章中，我们深入研究投资组合排序，这是实证资产定价中最广泛使用的统计方法之一（例如，Bali、Engle 和 Murray 2016）。投资组合排序的关键应用是检查一个或多个变量是否可以预测未来的超额收益。一般来说，这个想法是将个股分类到投资组合中，每个投资组合中的股票在排序变量（例如公司规模）方面相似。不同的投资组合代表了排序变量水平不同的高度多元化的投资。然后，您可以将回报分布的差异归因于排序变量的影响。我们首先介绍单变量投资组合排序（仅基于一个特征进行排序），并解决“值”和“双变量排序”中的双变量排序。
+
+单变量投资组合排序仅考虑一个排序变量$x_{t-1,i}$ 。这里，i表示股票并且t-1表明该特征是投资者在某个时间t可以观察到的 。
+
+目的是评估$x_{t-1,i}$ 和$r_{t,i}$ 之间的横截面关系。为了说明投资组合排序的工作原理，我们使用前一章中对市场贝塔值的估计作为排序变量。
+
+当前章节依赖于以下一组 R 包。
+
+```{r}
+library(tidyverse)
+library(RSQLite)
+library(scales)
+library(lmtest)
+library(broom)
+library(sandwich)
+```
+
+与前面的章节相比，我们引入了`lmtest` （[Zeiileis and Hothorn 2002](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-lmtest)）用于估计系数的推断，`broom`引入了包（[Robinson，Hayes，and Couch 2022](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-broom)）来整理许多估计线性模型的估计输出，以及`sandwich` （[Zeiileis 2006](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-sandwich)）用于不同的协方差矩阵估计器。
+
+## **数据准备**
+
+[我们首先从访问和管理财务数据](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)以及[WRDS、CRSP 和 Compustat](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)`SQLite`中介绍的数据库加载所需数据。特别是，我们使用每月 CRSP 样本作为我们的资产范围。一旦我们形成了投资组合，我们就使用 Fama-French 市场因子回报来计算风险调整后的表现（即阿尔法）。是前一章中计算的市场贝塔值的 tibble。`beta`
+
+```{r}
+tidy_finance <- dbConnect(
+  SQLite(),
+  "/Users/desmondli/Desktop/College/互联网与数字经济/赵宣凯老师/tidy finance/tidy_finance.sqlite",
+  extended_types = TRUE
+)
+
+crsp_monthly <- tbl(tidy_finance, "crsp_monthly") |>
+  select(permno, month, ret_excess, mktcap_lag) |>
+  collect()
+
+factors_ff3_monthly <- tbl(tidy_finance, "factors_ff_monthly") |>
+  select(month, mkt_excess) |>
+  collect()
+
+beta <- tbl(tidy_finance, "beta") |>
+  select(permno, month, beta_monthly) |>
+  collect()
+```
+
+## **按市场贝塔值排序**
+
+接下来，我们将排序变量与返回数据合并。我们使用一个月*滞后*贝塔作为排序变量，以确保排序仅依赖于我们创建投资组合时可用的信息。为了使股票贝塔值滞后一个月，我们在当前日期上添加一个月，并将结果信息与我们的回报数据相结合。此程序确保t月的信息在t+1月是可获得的。您可能会想简单地使用诸如之类的调用`crsp_monthly |> group_by(permno) |> mutate(beta_lag = lag(beta)))`来代替。但是，如果时间序列中存在非显式缺失值，则此过程将无法正常工作。
+
+```{r}
+beta_lag <- beta |>
+  mutate(month = month %m+% months(1)) |>
+  select(permno, month, beta_lag = beta_monthly) |>
+  drop_na()
+
+data_for_sorts <- crsp_monthly |>
+  inner_join(beta_lag, join_by(permno, month))
+```
+
+进行投资组合排序的第一步是计算可用于将股票分组到投资组合中的定期断点。为简单起见，我们从滞后市场贝塔值中值作为单一断点开始。然后，我们计算两个最终投资组合的价值加权回报，这意味着滞后的市值决定了 的权重`weighted.mean()`。
+
+```{r}
+beta_portfolios <- data_for_sorts |>
+  group_by(month) |>
+  mutate(
+    breakpoint = median(beta_lag),
+    portfolio = case_when(
+      beta_lag <= breakpoint ~ "low",
+      beta_lag > breakpoint ~ "high"
+    )
+  ) |>
+  group_by(month, portfolio) |>
+  summarize(ret = weighted.mean(ret_excess, mktcap_lag), 
+            .groups = "drop")
+beta_portfolios
+```
+
+## **绩效评估**
+
+我们可以基于两个投资组合构建多空策略：买入高贝塔投资组合，同时做空低贝塔投资组合。因此，市场的整体头寸是净零的，即在没有摩擦的情况下，您不需要投入资金来实现该策略。
+
+```{r}
+beta_longshort <- beta_portfolios |>
+  pivot_wider(id_cols = month, names_from = portfolio, values_from = ret) |>
+  mutate(long_short = high - low)
+beta_longshort
+```
+
+我们计算平均回报和相应的标准误差，以测试多空投资组合是否产生平均正超额回报或负超额回报。在资产定价文献中，通常使用Whitney K. Newey 和 West ( [1987](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Newey1987) )来调整自相关 t- 检验平均投资组合超额收益为零的零假设的统计数据。Newey-West 标准误差的一项必要输入是根据估计所采用的滞后数量选择带宽。虽然研究人员似乎经常默认选择预先指定的 6 个月滞后长度，但我们建议采用数据驱动的方法。这种自动选择由Whitney K. Newey 和 West ( [1994](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Newey1994) )提倡，并在软件包中提供`sandwich`。为了实现此测试，我们通过计算平均回报`lm()`，然后使用该`coeftest()`函数。如果您想实现典型的 6 滞后默认设置，您可以通过将参数传递`lag = 6, prewhite = FALSE`给`coeftest()`下面代码中的函数并将它们传递给`NeweyWest()`.
+
+```{r}
+model_fit <- lm(long_short ~ 1, data = beta_longshort)
+coeftest(model_fit, vcov = NeweyWest)
+```
+
+``` r
+
+t test of coefficients:
+
+            Estimate Std. Error t value Pr(>|t|)
+(Intercept) 5.95e-05   1.30e-03    0.05     0.96
+```
+
+结果表明我们不能拒绝平均回报为零的原假设。我们的投资组合策略使用中位数作为断点，因此不会产生任何异常回报。如果您重新考虑 CAPM，这一发现是否令人惊讶？必然是。CAPM 得出高贝塔值股票应该产生更高的预期回报。我们的投资组合排序隐含地模仿了通过做空低贝塔股票来为高贝塔股票融资的投资策略。因此，人们应该预期平均超额回报会产生高于无风险利率的回报。
+
+## **投资组合排序的函数式编程**
+
+现在我们将投资组合排序提升到一个新的水平。我们希望能够将股票分类到任意数量的投资组合中。对于这种情况，函数式编程非常方便：我们使用[curly-curly](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://www.tidyverse.org/blog/2019/06/rlang-0-4-0/%23a-simpler-interpolation-pattern-with-)运算符来灵活地选择使用哪个变量进行排序，用 表示`sorting_variable`。我们用来`quantile()`计算 的断点`n_portfolios`。然后，我们使用该`findInterval()`函数将投资组合分配给股票。以下函数的输出是一个新列，其中包含股票所属的投资组合的编号。
+
+在一些应用中，用于排序的变量可能是聚类的（例如，下限为0）。然后，多个断点可能相同，导致投资组合为空。同样，某些投资组合在样本开始时可能只有很少数量的股票。投资组合成分数量因特征分布而显着不同的情况需要仔细考虑，并且根据应用，可能需要定制的排序方法。
+
+```{r}
+assign_portfolio <- function(data, 
+                             sorting_variable, 
+                             n_portfolios) {
+  # Compute breakpoints
+  breakpoints <- data |>
+    pull({{sorting_variable}} ) |>
+    quantile(
+      probs = seq(0, 1, length.out = n_portfolios + 1),
+      na.rm = TRUE,
+      names = FALSE
+    )
+
+  # Assign portfolios
+  assigned_portfolios <- data |>
+    mutate(portfolio = findInterval(
+      pick(everything()) |>
+        pull({{ sorting_variable }}),
+      breakpoints,
+      all.inside = TRUE
+    )) |>
+    pull(portfolio)
+  
+  # Output
+  return(assigned_portfolios)
+}
+```
+
+我们可以使用上述函数，使用滞后贝塔值每月将股票分类为十个投资组合，并计算每个投资组合的价值加权回报。请注意，我们将投资组合列转换为因子变量，因为它为下面的图形构建提供了更多便利。
+
+```{r}
+beta_portfolios <- data_for_sorts |>
+  group_by(month) |>
+  mutate(
+    portfolio = assign_portfolio(
+      data = pick(everything()),
+      sorting_variable = beta_lag,
+      n_portfolios = 10
+    ),
+    portfolio = as.factor(portfolio)
+  ) |>
+  group_by(portfolio, month) |>
+  summarize(
+    ret_excess = weighted.mean(ret_excess, mktcap_lag),
+    .groups = "drop"
+  )|>
+  left_join(factors_ff3_monthly, join_by(month))
+```
+
+## **更多绩效评估**
+
+在下一步中，我们计算每个 beta 投资组合的汇总统计数据。也就是说，我们计算 CAPM 调整后的 alpha、每个 beta 投资组合的 beta 以及平均回报。
+
+```{r}
+beta_portfolios_summary <- beta_portfolios |>
+  nest(data = c(month, ret_excess, mkt_excess)) |>
+  mutate(estimates = map(
+    data, ~ tidy(lm(ret_excess ~ 1 + mkt_excess, data = .x))
+  )) |>
+  unnest(estimates) |> 
+  select(portfolio, term, estimate) |> 
+  pivot_wider(names_from = term, values_from = estimate) |> 
+  rename(alpha = `(Intercept)`, beta = mkt_excess) |> 
+  left_join(
+    beta_portfolios |> 
+      group_by(portfolio) |> 
+      summarize(ret_excess = mean(ret_excess),
+                .groups = "drop"), join_by(portfolio)
+  )
+beta_portfolios_summary
+```
+
+[图 1](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-701)显示了 beta 排序投资组合的 CAPM alpha。它表明，低贝塔投资组合往往表现出正阿尔法，而高贝塔投资组合往往表现出负阿尔法。
+
+```{r}
+beta_portfolios_summary |>
+  ggplot(aes(x = portfolio, y = alpha, fill = portfolio)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "CAPM alphas of beta-sorted portfolios",
+    x = "Portfolio",
+    y = "CAPM alpha",
+    fill = "Portfolio"
+  ) +
+  scale_y_continuous(labels = percent) +
+  theme(legend.position = "None")
+```
+
+图 1：投资组合每月根据估计的 CAPM beta 分为十分位数。条形图显示了整个 CRSP 期间所得投资组合回报的 CAPM alpha。
+
+这些结果表明贝塔值与未来股票回报之间存在负相关关系，这与 CAPM 的预测相矛盾。根据 CAPM，投资组合的回报率应随着贝塔值的增加而增加，并且风险调整后的回报率在统计上应与零没有区别。
+
+## **证券市场线和测试版投资组合**
+
+CAPM 预测我们的投资组合应位于证券市场线 (SML) 上。SML 的斜率等于市场风险溢价，反映了任何给定时间的风险回报权衡。[图 2](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-702)说明了证券市场线：我们看到（毫不奇怪）高贝塔投资组合回报与市场回报具有高度相关性。然而，高贝塔股票的平均超额回报似乎低于证券市场线所暗示的对高市场风险的“适当”补偿。
+
+```{r}
+sml_capm <- lm(ret_excess ~ 1 + beta, data = beta_portfolios_summary)$coefficients
+
+beta_portfolios_summary |>
+  ggplot(aes(
+    x = beta, 
+    y = ret_excess, 
+    color = portfolio
+  )) +
+  geom_point() +
+  geom_abline(
+    intercept = 0,
+    slope = mean(factors_ff3_monthly$mkt_excess),
+    linetype = "solid"
+  ) +
+  geom_abline(
+    intercept = sml_capm[1],
+    slope = sml_capm[2],
+    linetype = "dashed"
+  ) +
+  scale_y_continuous(
+    labels = percent,
+    limit = c(0, mean(factors_ff3_monthly$mkt_excess) * 2)
+  ) +
+  scale_x_continuous(limits = c(0, 2)) +
+  labs(
+    x = "Beta", y = "Excess return", color = "Portfolio",
+    title = "Average portfolio excess returns and average beta estimates"
+  )
+```
+
+图 2：超额收益按照 beta 排序投资组合的 CAPM alpha 计算。横轴表示生成的 beta 排序投资组合收益时间序列的 CAPM beta。虚线表示投资组合贝塔超额收益线性回归的斜率系数。
+
+为了提供更多反对 CAPM 预测的证据，我们再次制定多空策略，买入高贝塔投资组合并做空低贝塔投资组合。
+
+```{r}
+beta_longshort <- beta_portfolios |>
+  mutate(portfolio = case_when(
+    portfolio == max(as.numeric(portfolio)) ~ "high",
+    portfolio == min(as.numeric(portfolio)) ~ "low"
+  )) |>
+  filter(portfolio %in% c("low", "high")) |>
+  pivot_wider(id_cols = month, 
+              names_from = portfolio, 
+              values_from = ret_excess) |>
+  mutate(long_short = high - low) |>
+  left_join(factors_ff3_monthly, join_by(month))
+```
+
+同样，由此产生的多空策略并没有表现出统计上显着的回报。
+
+```{r}
+coeftest(lm(long_short ~ 1, data = beta_longshort),
+  vcov = NeweyWest
+)
+```
+
+然而，多空投资组合产生了统计上显着的负 CAPM 调整阿尔法，尽管在控制贝塔的影响的情况下，根据 CAPM，平均超额股票回报应为零。因此，结果没有提供支持 CAPM 的证据。负值被记录为所谓的对贝塔因子的投注（[Frazzini 和 Pedersen 2014](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Frazzini2014)）。做空贝塔系数相当于做空高贝塔系数股票并持有低贝塔系数股票（杠杆）多头头寸的策略。如果借贷限制阻止投资者在 SML 上建仓，他们反而会被激励购买高贝塔值股票，这会导致此类高贝塔值股票的价格相对较高（因此预期回报率低于 CAPM 隐含的预期回报）。因此，对赌贝塔策略通过向风险厌恶程度较低的资本约束投资者提供流动性来获利。
+
+```{r}
+coeftest(lm(long_short ~ 1 + mkt_excess, data = beta_longshort),
+  vcov = NeweyWest
+)
+```
+
+[图 3](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-703)显示了我们主要感兴趣的极端贝塔投资组合的年回报率。该图说明了过去几年中没有一致的显着模式 - 每个投资组合都表现出年回报率为正和负的时期。
+
+```{r}
+beta_longshort |>
+  group_by(year = year(month)) |>
+  summarize(
+    low = prod(1 + low),
+    high = prod(1 + high),
+    long_short = prod(1 + long_short)
+  ) |>
+  pivot_longer(cols = -year) |>
+  ggplot(aes(x = year, y = 1 - value, fill = name)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~name, ncol = 1) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = percent) +
+  labs(
+    title = "Annual returns of beta portfolios",
+    x = NULL, y = NULL
+  )
+```
+
+图 3：我们根据估计的 CAPM beta 将股票分为高位和低位来构建投资组合。多头空头是指买入高贝塔值股票并空头低贝塔值股票的策略。
+
+总的来说，本章展示了如何利用函数式编程使用任何排序变量形成任意数量的投资组合，以及如何评估所得投资组合的性能。在下一章中，我们将更深入地探讨投资组合分析中出现的许多自由度。
+
+## **练习**
+
+1.  采用基于不同数量的投资组合的两种多空贝塔策略并比较收益。回报率有显着差异吗？策略之间的夏普比率如何比较？找到一项额外的投资组合评估统计数据并计算它。
+
+2.  我们绘制了上面十个贝塔投资组合的阿尔法。编写一个函数来测试这些估计的显着性。哪些投资组合具有显着的阿尔法？
+
+3.  这里的分析基于月度回报的贝塔值。然而，我们还根据每日收益计算了贝塔值。重新运行分析并指出结果中的差异。
+
+4.  根据本章的结果，您能否定义一个产生正异常收益（即阿尔法）的多空策略？绘制策略的累积超额收益与市场超额收益进行比较。

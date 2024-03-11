@@ -1,0 +1,494 @@
+---
+title: "Tidy Finance"
+author: "Wenqiang Li"
+date: "2024-01-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **1. Getting Started**
+
+### **1.1 Setting Up Your Environment**
+
+#### **R语言**
+
+首先是一些好消息：您需要的软件是免费且易于下载的。我们将从下载和安装 R 开始，然后对 RStudio 执行相同的操作。
+
+[R 通过综合 R 档案网络](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://cran.r-project.org/)（或简称 CRAN）提供。CRAN不仅提供主要软件，还提供几乎所有您需要的扩展。我们稍后将介绍这些扩展或包，因为我们通常访问 CRAN 网站只是为了下载基础版本。现在，继续访问 CRAN。在登陆页面上，您可以选择操作系统（即 Linux、macOS 和 Windows）。单击适合您的系统的相应链接：
+
+-   R 是许多 Linux 发行版的一部分。如果没有，CRAN 会提供各个 Linux 发行版的安装指南。
+
+-   对于 macOS，当前的选择取决于某些硬件规格，但明确指出了适合您系统的版本。
+
+-   对于 Windows，您希望使用提供的基本版本。
+
+将软件下载并安装到您的系统后，您几乎就可以开始使用了。事实上，您现在就可以使用 R。不幸的是，对于许多用户来说，R 不是一个程序，而是一种编程语言，并且附带一个解释器，您可以像命令行一样使用它。虽然这样使用 R 可能会让您感觉自己像个黑客（并不是说我们不支持任何犯罪活动），但将 R 与 RStudio 结合起来符合您的最佳利益。
+
+R 不断更新，每年都会发布多次新版本。这意味着您将来可能想返回 CRAN 来获取更新。如果软件包提醒您正在使用过时的 R 版本，您就知道是时候进行更新了。
+
+#### **RStudio**
+
+假设您正在寻找一种更舒适的 R 使用方式，接下来您将获得 RStudio。[您可以从Posit](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://posit.co/download/rstudio-desktop/)（即创建 RStudio 的公司，以前称为 RStudio 本身）免费下载它。当您按照说明操作时，您将看到 Posit 要求您安装 R。但是，您应该已经完成了安装，并且可以直接下载并安装 RStudio。
+
+RStudio 是一个与您最可能使用的其他程序类似的程序，例如浏览器、文本编辑器或其他任何程序。它具有许多优势，包括项目经理、Github 集成等等。不幸的是，Tidy Finance 不是详细阐述这些可能性或介绍编程基础知识的合适范围，但我们向您推荐以下一些优秀资源。就本书而言，您已经完成了对为您提供必要软件安装程序的网站的访问。
+
+#### **R 包和环境**
+
+读完本书的序言后，您可能想知道为什么我们还没有下载`tidyverse`。因此，你必须了解一个概念，即 R 中的包。你可以将它们视为用于特定目的的扩展，而 R 本身才是一切所依赖的核心支柱。您可以使用以下代码轻松地在 R 中安装软件包。
+
+```{r}
+install.packages("tidyverse")
+```
+
+只需指定我们放置的您想要的包即可`tidyverse`。您通常只需要安装一次软件包 - 更新或特定于项目的 R 环境除外。安装后，您可以加载一个包并调用`library("tidyverse")`它来使用它。
+
+为了跟踪包的版本并使我们的结果可复制，我们依赖于包`renv`。它创建了特定于项目的 R 软件包安装，您可以在下面的版权页中找到此处使用的软件包的完整列表。记录的包版本还可以与协作者共享以确保一致性。我们的使用`renv`还使您可以通过使用来自 Github 的 renv.lock 文件进行初始化来更轻松地安装我们正在使用的确切软件包版本（如果您需要的`renv`话[）](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://github.com/tidy-finance/website/blob/main/renv.lock)。
+
+另一条建议是使用 RStudio 项目。它们是一个强大的工具，可以节省您的时间并使使用 R 变得更加有趣。这里不再详细介绍，我们建议您参阅Wickham、Çetinkaya-Rundel 和 Grolemund ( [2023](https://www-tidy--finance-org.translate.goog/r/setting-up-your-environment.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Wickham2023) )的["工作流程：脚本和项目"](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://r4ds.hadley.nz/workflow-scripts.html)一章。
+
+#### **您使用 R 的第一步**
+
+虽然我们相信下载和安装 R 和 RStudio 非常简单，但您可能会从Grolemund ( [2014](https://www-tidy--finance-org.translate.goog/r/setting-up-your-environment.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Grolemund2014) )那里找到[有关 R 和 RStudio](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://rstudio-education.github.io/hopr/starting.html)、[软件包](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://rstudio-education.github.io/hopr/packages2.html)以及[更新](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://rstudio-education.github.io/hopr/updating.html)软件的帮助。
+
+本书的目的不是向您介绍 R 本身。这不是我们的比较优势。但是，我们可以为您指出一条熟悉 R 的可能路径。因此，我们提出以下建议：
+
+-   如果您对 R 本身不熟悉，可以在Grolemund ( [2014](https://www-tidy--finance-org.translate.goog/r/setting-up-your-environment.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Grolemund2014) )中找到关于 R 工作原理的非常温和且精彩的介绍。[他以加权骰子项目](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://rstudio-education.github.io/hopr/project-1-weighted-dice.html)的形式提供了一个精彩的例子。在计算机上完成 R 设置后，请尝试按照本项目中的说明进行操作。
+
+-   `tidyverse`关于Wickham、Çetinkaya-Rundel 和 Grolemund ( [2023](https://www-tidy--finance-org.translate.goog/r/setting-up-your-environment.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Wickham2023) )的主要书籍可在线免费获取：[R for Data Science](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://r4ds.had.co.nz/introduction.html)解释了我们在书中使用的大部分工具。阅读本文是一次令人大开眼界的体验，而且非常有用。
+
+我们鼓励您使用的其他资源如下：
+
+-   如果您是一名寻求有效教授 R 和数据科学方法的讲师，我们建议您查看Mine Cetinkaya-Rundel提供的优秀[数据科学工具箱](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://datasciencebox.org/)[。](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://mine-cr.com/about/)
+
+-   RStudio 提供了一系列优秀的[备忘单](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://www.rstudio.com/resources/cheatsheets/)，其中包含有关如何使用这些`tidyverse`包的大量信息。
+
+### **1.2 Introduction to Tidy Finance**
+
+本章的主要目的是熟悉 tidyverse。我们首先从 Yahoo!Finance 下载并可视化股票数据。然后我们转向一个简单的投资组合选择问题并构建有效边界。这些示例向您介绍我们的*Tidy Finance*方法。
+
+#### **使用股票市场数据**
+
+在每个会话开始时，我们加载所需的 R 包。在整本书中，我们始终使用`tidyverse` ( [Wickham et al. 2019](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Wickham2019) )。在本章中，我们还加载了方便的`tidyquant`包（[Dancho 和 Vaughan 2022](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-tidyquant)）来下载价格数据。该包为与`tidyverse`. 最后，该软件包`scales` （[Wickham 和 Seidel 2022](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-scales)）为可视化提供了有用的比例函数。
+
+通常，您必须先安装软件包一次，然后才能加载它。如果您还没有这样做，请致电`install.packages("tidyquant")`。如果您在使用时遇到问题`tidyquant`，请查看相应的[文档。](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://cran.r-project.org/web/packages/tidyquant/vignettes/TQ00-introduction-to-tidyquant.html)
+
+```{r,warning=FALSE}
+library(tidyverse)
+library(tidyquant)
+library(scales)
+```
+
+我们首先直接从数据提供商 Yahoo!Finance下载一个股票代码的每日价格，例如苹果股票*AAPL 。*要下载数据，您可以使用命令`tq_get`。如果您不知道如何使用它，请务必通过调用 来阅读帮助文件`?tq_get`。我们特别建议您查看文档的示例部分。我们请求 20 多年的每日数据。
+
+```{r}
+prices <- tq_get("AAPL",
+ get = "stock.prices",
+ from = "2000-01-01",
+ to = "2022-12-31"
+)
+prices
+```
+
+接下来，我们使用该`ggplot2`包( [Wickham 2016](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-ggplot2) )来可视化[图 1](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-100)中调整价格的时间序列。该包负责基于图形语法原理的可视化任务（[Wilkinson 2012](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Wilkinson2012)）。
+
+```{r}
+prices |>
+  ggplot(aes(x = date, y = adjusted)) +
+  geom_line() +
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Apple stock prices between beginning of 2000 and end of 2022"
+  )
+```
+
+![图 1：价格以美元计算，并根据股息支付和股票分割进行调整。](https://www.tidy-finance.org/r/introduction-to-tidy-finance_files/figure-html/fig-100-1.png){width="467"}
+
+我们不分析价格，而是计算每日净回报，定义为$r_t=p_t/p_{t-1}-1$​​​， 在哪里$p_t$是调整后的日期t​价格。在这种情况下，该函数`lag()`很有用，它返回向量中的前一个值。
+
+```{r}
+returns <- prices |> 
+  arrange(date) |> 
+  mutate(ret = adjusted / lag(adjusted) - 1) |> 
+  select(symbol, date, ret)
+returns
+```
+
+生成的小标题包含三列，其中最后一列包含每日收益 ( `ret`)。请注意，第一个条目自然包含缺失值 ( `NA`)，因为没有先前的价格。`lag()`显然，如果时间序列不按日期升序排序，则使用是没有意义的。该命令`arrange()`提供了一种方便的方法，可以为我们的应用程序以正确的方式排序观测值。如果您想按日期降序排列观察结果，您可以使用`arrange(desc(date))`。
+
+对于接下来的示例，我们删除了缺失值，因为这些值在计算（例如样本平均值）时需要单独处理。然而，一般来说，请确保您了解`NA`值出现的原因，并仔细检查是否可以简单地消除这些观察结果。
+
+```{r}
+returns <- returns |> drop_na(ret)
+```
+
+[接下来，我们用图 2](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-101)中的直方图可视化每日回报的分布。此外，我们在直方图中添加了一条虚线，表示每日回报的 5% 分位数，这是股票最差回报的（粗略）代理，概率最多为 5%。5% 分位数与（历史）风险价值密切相关，这是监管机构通常监控的风险衡量标准。我们参考Tsay ( [2010](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Tsay2010) )以更全面地介绍回报的程式化事实。
+
+```{r}
+quantile_05 <- quantile(returns |> pull(ret), probs = 0.05)
+returns |>
+  ggplot(aes(x = ret)) +
+  geom_histogram(bins = 100) +
+  geom_vline(aes(xintercept = quantile_05),
+    linetype = "dashed"
+  ) +
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Distribution of daily Apple stock returns"
+  ) +
+  scale_x_continuous(labels = percent)
+```
+
+[![图 2：垂直虚线表示历史 5% 分位数。](https://www.tidy-finance.org/r/introduction-to-tidy-finance_files/figure-html/fig-101-1.png){alt="标题：苹果股票每日回报率的分布（以百分比表示）。 该图显示了每日回报的直方图。 该范围表示一些较大的负值，而其余收益分布在 0 附近。垂直线表示日收益的历史 5% 分位数约为负 3%。" width="553"}](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance_files/figure-html/fig-101-1.png?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)
+
+此处，`bins = 100`确定图中使用的 bin 数量，从而隐式确定 bin 的宽度。在继续之前，请确保您了解如何使用 geom`geom_vline()`添加一条虚线来指示每日回报的 5% 分位数。*在处理任何*数据之前的典型任务是计算感兴趣的主要变量的汇总统计数据。
+
+```{r}
+returns |>
+  summarize(across(
+    ret,
+    list(
+      daily_mean = mean,
+      daily_sd = sd,
+      daily_min = min,
+      daily_max = max
+    )
+  ))
+
+```
+
+``` r
+# A tibble: 1 × 4
+  ret_daily_mean ret_daily_sd ret_daily_min ret_daily_max
+           <dbl>        <dbl>         <dbl>         <dbl>
+1        0.00120       0.0251        -0.519         0.139
+```
+
+*我们看到每日*最大回报率为 13.905%。也许并不奇怪，平均每日收益接近但略高于0。与上图一致，收益最小的那一天的巨大损失表明收益分布的强烈不对称性。 您还可以通过强加 来单独计算每年的这些汇总统计数据`group_by(year = year(date))`，其中调用`year(date)`返回年份。更具体地说，下面的几行代码计算上面按年份定义的各个数据组的汇总统计数据。因此，汇总统计数据可以对回报分布的时间序列动态进行直观分析。
+
+```{r}
+returns |>
+  group_by(year = year(date)) |>
+  summarize(across(
+    ret,
+    list(
+      daily_mean = mean,
+      daily_sd = sd,
+      daily_min = min,
+      daily_max = max
+    ),
+    .names = "{.fn}"
+  )) |>
+  print(n = Inf)
+```
+
+``` r
+# A tibble: 23 × 5
+    year daily_mean daily_sd daily_min daily_max
+   <dbl>      <dbl>    <dbl>     <dbl>     <dbl>
+ 1  2000 -0.00346     0.0549   -0.519     0.137 
+ 2  2001  0.00233     0.0393   -0.172     0.129 
+ 3  2002 -0.00121     0.0305   -0.150     0.0846
+ 4  2003  0.00186     0.0234   -0.0814    0.113 
+ 5  2004  0.00470     0.0255   -0.0558    0.132 
+ 6  2005  0.00349     0.0245   -0.0921    0.0912
+...
+```
+
+如果您想知道：中的附加参数`.names = "{.fn}"`确定`across()`如何命名输出列。该规范相当灵活，几乎允许任意列名称，这对于报告非常有用。该`print()`函数仅控制 R 控制台的输出选项。
+
+#### **扩大分析范围**
+
+下一步，我们概括之前的代码，以便所有计算都可以处理任意符号向量（例如，索引的所有组成部分）。遵循整洁的原则，下载数据、绘制价格时间序列以及将任意数量的资产的汇总统计数据制成表格是非常容易的。
+
+这就是`tidyverse`魔法开始的地方：整洁的数据使得将之前的计算推广到您喜欢的任意数量的资产变得非常容易。以下代码采用任何符号向量（例如 ）`symbol <- c("AAPL", "MMM", "BA")`，并自动下载以及价格时间序列的绘图。最后，我们为任意数量的资产创建汇总统计表。[我们使用道琼斯工业平均指数](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average)当前所有成分股的数据进行分析。
+
+```{r}
+symbols <- tq_index("DOW") |> 
+  filter(company != "US DOLLAR")
+symbols
+```
+
+``` r
+# A tibble: 30 × 8
+  symbol company           identifier sedol weight sector shares_held
+  <chr>  <chr>             <chr>      <chr>  <dbl> <chr>        <dbl>
+1 UNH    UNITEDHEALTH GRO… 91324P102  2917… 0.0943 -          5803926
+2 GS     GOLDMAN SACHS GR… 38141G104  2407… 0.0678 -          5803926
+3 MSFT   MICROSOFT CORP    594918104  2588… 0.0645 -          5803926
+4 HD     HOME DEPOT INC    437076102  2434… 0.0602 -          5803926
+5 AMGN   AMGEN INC         031162100  2023… 0.0532 -          5803926
+# ℹ 25 more rows
+# ℹ 1 more variable: local_currency <chr>
+```
+
+方便地，`tidyquant`提供了通过一次调用即可获取股票指数中所有股票的功能（同样，`tq_exchange("NASDAQ")`传递当前在纳斯达克交易所上市的所有股票）。
+
+```{r}
+index_prices <- tq_get(symbols, 
+  get = "stock.prices",
+  from = "2000-01-01", to = "2022-12-31")
+```
+
+生成的 tibble 包含 30 个不同公司的 165593 个日常观察结果。[图 3](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-103)显示了道琼斯指数各成分股的下载*调整*价格的时间序列。确保您理解每一行代码！的论点是什么`aes()`？您可以使用哪种替代方法`geoms`来可视化时间序列？提示：如果您不知道答案，请尝试更改代码，看看您的干预会导致什么差异。
+
+```{r}
+index_prices |>
+  ggplot(aes(
+    x = date,
+    y = adjusted,
+    color = symbol
+  )) +
+  geom_line() +
+  labs(
+    x = NULL,
+    y = NULL,
+    color = NULL,
+    title = "Stock prices of DOW index constituents"
+  ) +
+  theme(legend.position = "none")
+```
+
+[![图 3：以美元计算的价格，根据股息支付和股票分割进行调整。](https://www.tidy-finance.org/r/introduction-to-tidy-finance_files/figure-html/fig-103-1.png){alt="标题：道琼斯指数成分股的股票价格。 该图显示了许多具有每日价格的时间序列。 对于道琼斯指数中的大多数股票来说，总体趋势似乎是积极的。" width="538"}](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance_files/figure-html/fig-103-1.png?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)
+
+您是否注意到与我们之前使用的代码相比的细微差别？`tq_get(symbols)`还返回多个符号的小标题。要同时说明所有股票符号，我们所需要做的就是将其纳入美学`color = symbol`之中`ggplot`。通过这种方式，我们为每个符号生成单独的行。当然，这张图表上的线条太多，无法正确识别个股，但它很好地说明了这一点。
+
+股票回报也是如此。在计算回报之前，我们使用`group_by(symbol)`这样的命令，`mutate()`分别对每个交易品种执行该命令。相同的逻辑也适用于汇总统计数据的计算：`group_by(symbol)`是将时间序列聚合为感兴趣的符号特定变量的关键。
+
+```{r}
+all_returns <- index_prices |>
+  group_by(symbol) |>
+  mutate(ret = adjusted / lag(adjusted) - 1) |>
+  select(symbol, date, ret) |>
+  drop_na(ret)
+
+all_returns |>
+  group_by(symbol) |>
+  summarize(across(
+    ret,
+    list(
+      daily_mean = mean,
+      daily_sd = sd,
+      daily_min = min,
+      daily_max = max
+    ),
+    .names = "{.fn}"
+  )) |>
+  print(n = Inf)
+```
+
+``` r
+# A tibble: 30 × 5
+   symbol daily_mean daily_sd daily_min daily_max
+   <chr>       <dbl>    <dbl>     <dbl>     <dbl>
+ 1 AAPL     0.00120    0.0251    -0.519     0.139
+ 2 AMGN     0.000489   0.0197    -0.134     0.151
+ 3 AXP      0.000518   0.0229    -0.176     0.219
+ 4 BA       0.000595   0.0224    -0.238     0.243
+ 5 CAT      0.000709   0.0204    -0.145     0.147
+ 6 CRM      0.00110    0.0270    -0.271     0.260
+ 7 CSCO     0.000317   0.0237    -0.162     0.244
+ 8 CVX      0.000553   0.0176    -0.221     0.227
+ 9 DIS      0.000418   0.0195    -0.184     0.160
+10 DOW      0.000562   0.0260    -0.217     0.209
+11 GS       0.000550   0.0231    -0.190     0.265
+12 HD       0.000543   0.0194    -0.287     0.141
+13 HON      0.000515   0.0194    -0.174     0.282
+...
+```
+
+请注意，您现在还配备了所有工具，可以使用相同的代码行数下载 S&P 500 指数中列出的*每个品种的价格数据。*只需使用`symbol <- tq_index("SP500")`，它会为您提供一个小标题，其中包含（当前）S&P 500 一部分的每个符号。但是，如果您不准备等待几分钟，请不要尝试此操作，因为这是相当多的数据下载！
+
+#### **其他形式的数据聚合**
+
+当然，除此之外的变量之间的聚合`symbol`也是有意义的。例如，假设您有兴趣回答以下问题：总交易量较高的日子之后是否可能会出现总交易量较高的日子？为了对这个问题进行一些初步分析，我们获取下载的数据并计算所有道琼斯成分股（以美元计）的每日总交易量。请记住，该列`volume`以交易股票数量表示。因此，我们将交易量乘以每日收盘价，以获得美元总交易量的代理值。按比例缩放`1e9`（R 可以处理科学记数法）表示每日交易量（以十亿美元为单位）。
+
+```{r}
+trading_volume <- index_prices |>
+  group_by(date) |>
+  summarize(trading_volume = sum(volume * adjusted))
+
+trading_volume |>
+  ggplot(aes(x = date, y = trading_volume)) +
+  geom_line() +
+  labs(
+    x = NULL, y = NULL,
+    title = "Aggregate daily trading volume of DOW index constitutens"
+  ) +
+    scale_y_continuous(labels = unit_format(unit = "B", scale = 1e-9))
+```
+
+[![图 4：每日总交易量（十亿美元）](https://www.tidy-finance.org/r/introduction-to-tidy-finance_files/figure-html/fig-104-1.png){alt="标题：每日总交易量。 图中显示了日交易量波动的时间序列，范围从2000年的15到2022年的20.5，最高超过100。" width="552"}](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance_files/figure-html/fig-104-1.png?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)
+
+[图 4](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-104)显示每日总交易量呈明显上升趋势。特别是，自 COVID-19 大流行爆发以来，市场处理了大量交易量，例如Goldstein、Koijen 和 Mueller ( [2021](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Goldstein2021) )的分析。说明交易量持续性的一种方法是绘制当日交易量t相对于当日交易量t-1如下例所示。在[图 5](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-105)中，我们添加了一条 45° 虚线，通过 表示假设的一对一关系`geom_abline()`，解决了轴刻度中的潜在差异。
+
+```{r}
+trading_volume |>
+  ggplot(aes(x = lag(trading_volume), y = trading_volume)) +
+  geom_point() +
+  geom_abline(aes(intercept = 0, slope = 1),
+    linetype = "dashed"
+  ) +
+  labs(
+    x = "Previous day aggregate trading volume",
+    y = "Aggregate trading volume",
+    title = "Persistence in daily trading volume of DOW index constituents"
+  ) + 
+  scale_x_continuous(labels = unit_format(unit = "B", scale = 1e-9)) +
+  scale_y_continuous(labels = unit_format(unit = "B", scale = 1e-9))
+```
+
+![图 5：每日总交易量（十亿美元）](https://www.tidy-finance.org/r/introduction-to-tidy-finance_files/figure-html/fig-105-1.png){alt="标题：道指成分股每日交易量的持续性。 该图显示了一个散点图，其中总交易量和前一日总交易量沿 45 度线整齐排列。" width="588"}
+
+您了解警告的`## Warning: Removed 1 rows containing missing values (geom_point).`来源和含义吗？纯粹通过目视观察可以发现，高交易量的日子之后往往会出现类似的高交易量的日子。
+
+#### **投资组合选择问题**
+
+在上一部分中，我们展示了如何下载股市数据并通过图表和汇总统计数据进行检查。现在，我们转向金融中的一个典型问题：如何在不同资产之间优化分配财富。最佳投资组合选择的标准框架考虑了喜欢更高未来回报但不喜欢未来回报波动性（定义为回报方差的平方根）的投资者：*均值方差投资者* （[Markowitz 1952](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Markowitz1952)）。
+
+在均值方差背景下评估投资组合的一个重要工具是*有效边界*，即满足以下条件的投资组合集合：不存在具有更高预期收益但具有相同波动性（方差的平方根，即风险），参见，例如，Merton（[1972](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Merton1972)）。我们计算并可视化几种股票的有效边界。首先，我们提取每项资产的*月*回报。为了简单起见，我们采用平衡面板，并排除了道指成分股，因为我们没有观察到自 2000 年以来每个交易日的价格。
+
+```{r}
+index_prices <- index_prices |>
+  group_by(symbol) |>
+  mutate(n = n()) |>
+  ungroup() |>
+  filter(n == max(n)) |>
+  select(-n)
+returns <- index_prices |>
+  mutate(month = floor_date(date, "month")) |>
+  group_by(symbol, month) |>
+  summarize(price = last(adjusted), .groups = "drop_last") |>
+  mutate(ret = price / lag(price) - 1) |>
+  drop_na(ret) |>
+  select(-price)
+```
+
+这里是包`floor_date()`中的一个函数（[Grolemund 和 Wickham 2011](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-lubridate)），它提供了处理日期和时间的有用函数。`lubridate`
+
+接下来，我们将返回值从整齐的 tibble 转换为一个($T\times N$) 矩阵，该矩阵有T个交易日，N个股票。
+
+$$
+\hat{\mu}=\frac{1}{T}\sum_{t=1}^Tr_t \quad \hat{\sum}=\frac{1}{T-1}\sum_{t=1}^T(r_t-\hat{\mu})(r_t-\hat{\mu})^{'}
+$$
+
+我们通过使用`pivot_wider()`列中的新列名称`symbol`并将值设置为 来实现此目的`ret`。我们计算样本平均收益向量和样本方差-协方差矩阵，我们将其视为未来股票收益分布参数的代理。因此，为了简单起见，我们指的是Σ和mu而不是明确强调样本矩是估计值。在后面的章节中，我们将讨论考虑估计不确定性后出现的问题。
+
+```{r}
+returns_matrix <- returns |>
+  pivot_wider(
+    names_from = symbol,
+    values_from = ret
+  ) |>
+  select(-month)
+sigma <- cov(returns_matrix)
+mu <- colMeans(returns_matrix)
+```
+
+然后，我们计算最小方差投资组合权重$\omega_\text{mvp}$,期望收益$\omega_\text{mvp}'\mu$和波动性$\sqrt{\omega_\text{mvp}'\Sigma\omega_\text{mvp}}$。回想一下，最小方差投资组合是以下投资组合权重向量的解。
+
+$$
+\omega_\text{mvp} = \arg\min \omega'\Sigma \omega \text{ s.t. } \sum\limits_{i=1}^N\omega_i = 1.
+$$
+
+权重总和为 1 的约束条件简单地说，就是所有资金都要分配到可用的资产领域，即不可能保留现金。解得$\omega_\text{mvp} = \frac{\Sigma^{-1}\iota}{\iota'\Sigma^{-1}\iota}$，其中$\iota$是单位向量。（证明见[Proofs](https://www.tidy-finance.org/python/proofs.html)）
+
+```{r}
+N <- ncol(returns_matrix)
+iota <- rep(1, N)
+sigma_inv <- solve(sigma)
+mvp_weights <- sigma_inv %*% iota
+mvp_weights <- mvp_weights / sum(mvp_weights)
+tibble(
+  average_ret = as.numeric(t(mvp_weights) %*% mu),
+  volatility = as.numeric(sqrt(t(mvp_weights) %*% sigma %*% mvp_weights))
+)
+```
+
+``` r
+# A tibble: 1 × 2
+  average_ret volatility
+        <dbl>      <dbl>
+1     0.00792     0.0321
+```
+
+该命令`solve(A, b)`返回方程组的解AX=b。如果`b`未提供，如上例所示，它默认为单位矩阵，以便`solve(sigma)`提供Σ-1（如果存在唯一的解决方案）。 请注意，最小方差投资组合的*月*波动率与各个成分的*日*标准差具有相同的数量级。因此，多元化在降低风险方面的好处是巨大的！
+
+接下来，我们着手寻找投资组合的权重，例如，该投资组合的预期收益是最小方差投资组合的三倍。然而，均值方差投资者并不对任何达到所需回报的投资组合感兴趣，而是对有效投资组合感兴趣，即标准差最低的投资组合。如果您想知道解决方案在哪里$\omega_\text{eff}$有效值*来自：有效投资组合是由投资者选择的，其目标是在给定最小可接受的预期回报mu的情况下*实现最小方差 。因此，他们的目标函数是：
+
+$$
+\omega_\text{eff}(\bar{\mu}) = \arg\min \omega'\Sigma \omega \text{ s.t. } \omega'\iota = 1 \text{ and } \omega'\mu \geq \bar{\mu}.
+$$
+
+下面的代码实现了该优化问题的解析解以获得基准回报mu，我们将其设置为最小方差投资组合预期回报的 3 倍。我们鼓励您验证它是否正确。
+
+```{r}
+benchmark_multiple <- 3
+mu_bar <- benchmark_multiple * t(mvp_weights) %*% mu
+C <- as.numeric(t(iota) %*% sigma_inv %*% iota)
+D <- as.numeric(t(iota) %*% sigma_inv %*% mu)
+E <- as.numeric(t(mu) %*% sigma_inv %*% mu)
+lambda_tilde <- as.numeric(2 * (mu_bar - D / C) / (E - D^2 / C))
+efp_weights <- mvp_weights +
+  lambda_tilde / 2 * (sigma_inv %*% mu - D * mvp_weights)
+```
+
+#### **有效前沿**
+
+共同基金分离定理指出，一旦我们有两个有效的投资组合（例如最小方差投资组合$w_{mvp}$以及有效的投资组合以获得更高的预期回报水平$w_{eff}(\bar{\mu})$，我们可以通过组合这两个投资组合来表征整个有效边界。也就是说，两个投资组合权重的任何线性组合将再次代表一个有效的投资组合。*下面的代码实现了有效边界*的构建，它描述了每个风险级别可实现的最高预期回报。为了更好地理解代码，请确保熟悉`for`循环的内部工作原理。
+
+```{r}
+length_year <- 12
+a <- seq(from = -0.4, to = 1.9, by = 0.01)
+res <- tibble(
+  a = a,
+  mu = NA,
+  sd = NA
+)
+for (i in seq_along(a)) {
+  w <- (1 - a[i]) * mvp_weights + (a[i]) * efp_weights
+  res$mu[i] <- length_year * t(w) %*% mu  
+  res$sd[i] <- sqrt(length_year) * sqrt(t(w) %*% sigma %*% w)
+}
+```
+
+上面的代码分两步进行：首先，我们计算组合权重的向量$a$然后我们估计得到的线性组合$a\in R$:
+
+$$w^*=aw_{eff}(\bar{\mu})+(1-a)w_{mvp}=w_{mvp}+\frac{\lambda^*}{2}(\Sigma^{-1}\mu-\frac{D}{C}\Sigma^{-1}\iota)$$
+这里$\lambda^*=2\frac{a\bar{\mu}+(1-a)\bar{\mu}-D/C}{E-D^2/C}$,$C=\iota'\Sigma^{-1}\iota,\quad D=\iota'\Sigma^{-1}\mu, \quad E=\mu'\Sigma^{-1}\mu$
+
+最后，使用一个强大的图形可以轻松地将有效边界与两个有效投资组合可视化`ggplot`（见图[6](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-106)）。我们还在同一看涨期权中添加个股。我们基于每月回报独立且同分布的简单假设来计算年化回报。因此，平均年化回报仅为预期月回报的12倍。
+
+```{r}
+res |>
+  ggplot(aes(x = sd, y = mu)) +
+  geom_point() +
+  geom_point(
+    data = res |> filter(a %in% c(0, 1)),
+    size = 4
+  ) +
+  geom_point(
+    data = tibble(
+      mu = length_year * mu,       
+      sd = sqrt(length_year) * sqrt(diag(sigma))
+    ),
+    aes(y = mu, x = sd), size = 1
+  ) +
+  labs(
+    x = "Annualized standard deviation",
+    y = "Annualized expected return",
+    title = "Efficient frontier for DOW index constituents"
+  ) +
+  scale_x_continuous(labels = percent) +
+  scale_y_continuous(labels = percent)
+```
+
+![](https://www.tidy-finance.org/r/introduction-to-tidy-finance_files/figure-html/fig-106-1.png)
+
+图 6：大点表示最小方差的位置以及分别提供最小方差投资组合预期回报 3 倍的有效投资组合的位置。小点表示各个成分的位置。
+
+[图 6](https://www-tidy--finance-org.translate.goog/r/introduction-to-tidy-finance.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-106)中的线表示有效边界：均值方差有效投资者会选择的投资组合集合。比较相对于单个资产（点）的表现 - 应该清楚的是，多元化会产生巨大的绩效收益（至少只要我们采用参数Σ和$\mu$如给定）。

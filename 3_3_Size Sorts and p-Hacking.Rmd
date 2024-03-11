@@ -1,0 +1,329 @@
+---
+title: "3_3_Size Sorts and p-Hacking"
+author: "Wenqiang Li"
+date: "2024-03-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+在本章中，我们继续在单变量设置中进行投资组合排序。然而，我们将公司规模视为一个排序变量，这产生了一个众所周知的回报因素：规模溢价。规模溢价源于买入小股和卖出大股。值得注意的是，Fama 和 French ( 1993 )将其作为他们的三因素模型中的一个因素。除此之外，资产管理公司在做出投资决策时通常将规模作为公司的关键特征。
+
+我们还在投资组合的形成方面引入了新的选择。我们特别讨论了上市交易所、行业、权重制度和时期。这些选择对投资组合回报很重要，并会导致不同规模的溢价Walter、Weber 和 Weiss ( 2022 )。利用这些想法来产生有利的结果被称为 **p-hacking**。可以说，p-hacking 和进行稳健性测试之间只有一线之隔。我们在这里的目的是说明证据生成过程中可能出现的重大变化。
+
+本章依赖于以下一组包：
+
+```{r}
+library(tidyverse)
+library(RSQLite)
+library(scales)
+library(sandwich)
+library(lmtest)
+library(furrr)
+library(rlang)
+```
+
+与前面的章节相比，我们引入了用于更高级的函数表达式解析的`rlang`包（[Henry and Wickham 2022](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-rlang)） 。
+
+## **数据准备**
+
+[首先，我们从访问和管理财务数据](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)以及[WRDS、CRSP 和 Compustat](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)`SQLite`中介绍的数据库中检索相关数据。在我们从 CRSP 检索到的大多数资产定价应用程序中，公司规模被定义为市场权益。我们进一步使用 Fama-French 因子回报进行绩效评估。
+
+```{r}
+tidy_finance <- dbConnect(
+  SQLite(),
+  "/Users/desmondli/Desktop/College/互联网与数字经济/赵宣凯老师/tidy finance/tidy_finance.sqlite",
+  extended_types = TRUE
+)
+
+crsp_monthly <- tbl(tidy_finance, "crsp_monthly") |>
+  collect()
+
+factors_ff3_monthly <- tbl(tidy_finance, "factors_ff_monthly") |>
+  select(smb) |>
+  collect()
+```
+
+## **Size分布**
+
+*在建立规模投资组合之前，我们研究可变公司规模*的分布。可视化数据是理解分析输入的一个有价值的起点。图 8.1 显示了最大公司集中的总市值比例。为了生成此图表，我们创建了每月指标来跟踪股票是否属于最大 x% 的公司。然后，我们汇总每个类别中的公司并计算这些类别在总市值中的份额。
+
+[图 1](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-801)显示，最大的 1% 的公司覆盖了总市值的 50%，而仅持有 CRSP 领域中最大的 25% 的公司基本上复制了市场投资组合。因此，企业规模的分布意味着，只要我们使用价值加权基准，市场上最大的企业就会主导许多小企业。
+
+```{r}
+#图1
+crsp_monthly |>
+  group_by(month) |>
+  mutate(
+    top01 = if_else(mktcap >= quantile(mktcap, 0.99), 1, 0),
+    top05 = if_else(mktcap >= quantile(mktcap, 0.95), 1, 0),
+    top10 = if_else(mktcap >= quantile(mktcap, 0.90), 1, 0),
+    top25 = if_else(mktcap >= quantile(mktcap, 0.75), 1, 0)
+  ) |>
+  summarize(
+    total_market_cap =  sum(mktcap),
+    `Largest 1% of stocks` = sum(mktcap[top01 == 1]) / total_market_cap,
+    `Largest 5% of stocks` = sum(mktcap[top05 == 1]) / total_market_cap,
+    `Largest 10% of stocks` = sum(mktcap[top10 == 1]) / total_market_cap,
+    `Largest 25% of stocks` = sum(mktcap[top25 == 1]) / total_market_cap,
+    .groups = "drop"
+  ) |>
+  select(-total_market_cap) |> 
+  pivot_longer(cols = -month) |>
+  mutate(name = factor(name, levels = c(
+    "Largest 1% of stocks", "Largest 5% of stocks",
+    "Largest 10% of stocks", "Largest 25% of stocks"
+  ))) |>
+  ggplot(aes(
+    x = month, 
+    y = value, 
+    color = name,
+    linetype = name)) +
+  geom_line() +
+  scale_y_continuous(labels = percent, limits = c(0, 1)) +
+  labs(
+    x = NULL, y = NULL, color = NULL, linetype = NULL,
+    title = "Percentage of total market capitalization in largest stocks"
+  )
+```
+
+图 1：我们报告了每月横截面中属于最大公司 1%、5%、10% 和 25% 分位数的所有股票的总市值相对于当月所有股票市值的比例。
+
+其次，不同上市交易所的公司规模也有所不同。股票的首次上市在过去很重要，并且在今天仍然可能具有重要意义。[图 2](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-802)显示，纽约证券交易所 (NYSE) 曾经并且仍然是市值最大的上市交易所。最近，纳斯达克作为上市交易所获得了重要地位。你知道2000年左右纳斯达克市值的小高峰是多少吗？
+
+```{r}
+crsp_monthly |>
+  group_by(month, exchange) |>
+  summarize(mktcap = sum(mktcap),
+            .groups = "drop_last") |>
+  mutate(share = mktcap / sum(mktcap)) |>
+  ggplot(aes(
+    x = month, 
+    y = share, 
+    fill = exchange, 
+    color = exchange)) +
+  geom_area(
+    position = "stack",
+    stat = "identity",
+    alpha = 0.5
+  ) +
+  geom_line(position = "stack") +
+  scale_y_continuous(labels = percent) +
+  labs(
+    x = NULL, y = NULL, fill = NULL, color = NULL,
+    title = "Share of total market capitalization per listing exchange"
+  )
+```
+
+图2：横轴为年份，纵轴为各上市交易所相应的总市值份额。
+
+最后，我们考虑不同上市交易所的公司规模分布并创建汇总统计数据。函数`summary()`不包括我们感兴趣的所有统计数据，这就是为什么我们创建`create_summary()`添加标准差和观测值数量的函数。然后，我们将其应用于每个上市交易所的 CRSP 数据的最新月份。我们还添加一行，其中`add_row()`包含总体汇总统计数据。
+
+得出的表格显示，2021 年 12 月在纽约证券交易所上市的公司平均规模明显大于在其他交易所上市的公司。此外，纳斯达克上市的公司数量最多。上市交易所的公司规模之间的这种差异促使研究人员专门在纽约证券交易所样本上形成断点，并将这些断点应用于所有股票。在下文中，我们使用这种区别来更新我们的投资组合排序过程。
+
+```{r}
+create_summary <- function(data, column_name) {
+  data |>
+    select(value = {{ column_name }}) |>
+    summarize(
+      mean = mean(value),
+      sd = sd(value),
+      min = min(value),
+      q05 = quantile(value, 0.05),
+      q50 = quantile(value, 0.50),
+      q95 = quantile(value, 0.95),
+      max = max(value),
+      n = n()
+    )
+}
+
+crsp_monthly |>
+  filter(month == max(month)) |>
+  group_by(exchange) |>
+  create_summary(mktcap) |>
+  add_row(crsp_monthly |>
+            filter(month == max(month)) |>
+            create_summary(mktcap) |>
+            mutate(exchange = "Overall"))
+```
+
+## **具有灵活断点的单变量规模投资组合**
+
+在[单变量投资组合排序](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)中，我们构建具有不同数量的断点和不同排序变量的投资组合。在这里，我们扩展了框架，以便我们在数据子集上计算断点，例如，基于选定的上市交易所。在已发表的资产定价文章中，许多学者仅计算在纽约证券交易所上市的股票的排序断点。然后，这些纽约证券交易所特定的断点将应用于整个股票领域。
+
+为了复制以 NYSE 为中心的排序过程，我们`exchanges`在函数中引入一个参数`assign_portfolio()`。然后特定于交换的参数进入过滤器`filter(exchange %in% exchanges)`。例如，如果`exchanges = 'NYSE'`指定，则仅使用在 NYSE 上市的股票来计算断点。或者，您可以指定`exchanges = c("NYSE", "NASDAQ", "AMEX")`，这将使所有股票在这两个交易所之一上上市。总的来说，正则表达式是一个强大的工具，这里我们只涉及一个具体案例。
+
+```{r}
+assign_portfolio <- function(n_portfolios,
+                             exchanges,
+                             data) {
+  # Compute breakpoints
+  breakpoints <- data |>
+    filter(exchange %in% exchanges) |>
+    pull(mktcap_lag) |>
+    quantile(
+      probs = seq(0, 1, length.out = n_portfolios + 1),
+      na.rm = TRUE,
+      names = FALSE
+    )
+
+  # Assign portfolios
+  assigned_portfolios <- data |>
+    mutate(portfolio = findInterval(mktcap_lag,
+      breakpoints,
+      all.inside = TRUE
+    )) |>
+    pull(portfolio)
+  
+  # Output
+  return(assigned_portfolios)
+}
+```
+
+## **投资组合的加权方案**
+
+除了计算不同样本的断点外，研究人员还经常使用不同的投资组合加权方案。到目前为止，我们根据上一时期的相对市场权益对每个投资组合成分进行加权。该协议称为*价值加权*。另一种协议是*等权重*，它为每只股票的回报分配相同的权重，即成分股回报的简单平均值。请注意，等权重在实践中很困难，因为投资组合经理需要每月重新平衡投资组合，而价值权重是一种真正的被动投资。
+
+我们在函数中实现了两种加权方案`compute_portfolio_returns()`，该函数采用逻辑参数来按公司价值对回报进行加权。该语句`if_else(value_weighted, weighted.mean(ret_excess, mktcap_lag), mean(ret_excess))`生成价值加权回报 if `value_weighted = TRUE`。此外，多空投资组合在最小的公司中做多，在最大的公司中做空，这与研究表明小公司的表现优于较大的同行相一致。[除了这两个更改之外，该功能与单变量投资组合排序](https://www-tidy--finance-org.translate.goog/r/univariate-portfolio-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)中的过程类似。
+
+```{r}
+compute_portfolio_returns <- function(n_portfolios = 10,
+                                      exchanges = c("NYSE", "NASDAQ", "AMEX"),
+                                      value_weighted = TRUE,
+                                      data = crsp_monthly) {
+  data |>
+    group_by(month) |>
+    mutate(portfolio = assign_portfolio(
+      n_portfolios = n_portfolios,
+      exchanges = exchanges,
+      data = pick(everything())
+    )) |>
+    group_by(month, portfolio) |>
+    summarize(
+      ret = if_else(value_weighted,
+        weighted.mean(ret_excess, mktcap_lag),
+        mean(ret_excess)
+      ),
+      .groups = "drop_last"
+    ) |>
+    summarize(size_premium = ret[portfolio == min(portfolio)] -
+      ret[portfolio == max(portfolio)]) |>
+    summarize(size_premium = mean(size_premium))
+}
+```
+
+为了了解该函数是如何`compute_portfolio_returns()`工作的，我们考虑一个具有价值加权回报的简单中值断点示例。我们感兴趣的是限制上市交易所对规模溢价估计的影响。在第一个函数调用中，我们根据所有上市交易所的断点计算返回值。然后，我们根据纽约证券交易所上市股票的断点计算回报。
+
+```{r}
+ret_all <- compute_portfolio_returns(
+  n_portfolios = 2,
+  exchanges = c("NYSE", "NASDAQ", "AMEX"),
+  value_weighted = TRUE,
+  data = crsp_monthly
+)
+
+ret_nyse <- compute_portfolio_returns(
+  n_portfolios = 2,
+  exchanges = "NYSE",
+  value_weighted = TRUE,
+  data = crsp_monthly
+)
+
+tibble(
+  Exchanges = c("NYSE, NASDAQ & AMEX", "NYSE"),
+  Premium = as.numeric(c(ret_all, ret_nyse)) * 100
+)
+```
+
+该表显示，如果我们仅考虑 NYSE 每月形成断点的股票，则规模溢价要高出 60% 以上。纽约证券交易所特定的断点更大，并且在由此产生的小型投资组合中包含整个宇宙中超过 50% 的股票，因为纽约证券交易所公司的平均规模更大。这一选择的影响不容忽视。
+
+## **P-黑客攻击和非标准错误**
+
+由于上市交易所的选择具有重大影响，下一步是研究研究人员在此过程中必须做出的其他数据处理决策的影响。特别是，任何投资组合排序分析都必须至少决定投资组合的数量、形成断点的上市交易所以及等权重或价值权重。此外，可以排除活跃于金融行业的公司或将分析限制在时间序列的某些部分。我们在这里讨论的所有这些选择的变化都是顶级金融期刊上发表的学术文章的一部分。我们参考Walter、Weber 和 Weiss ( [2022](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Walter2022) )，了解研究人员自行决定的一组广泛的其他决策节点。
+
+此应用程序的目的是表明形成投资组合的不同方式会导致不同的估计规模溢价。尽管有多种选择的影响，但没有正确的方法。还应该指出的是，这些程序都没有错误，目的只是为了说明由于证据生成过程的变化而可能出现的变化（[Menkveld 等人，2021](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Menkveld2022)）。*非标准误差*一词是指由于研究人员做出的（合适的）选择而产生的变化。有趣的是，在一项大规模研究中，Menkveld 等人。（[2021](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Menkveld2022)）发现非标准误差的大小与基于所选模型的估计不确定性相似，这表明在数据准备和评估工作流程中调整看似无辜的选择是多么重要。
+
+从恶意的角度来看，这些建模选择为研究人员提供了多次发现统计显着结果的*机会。*然而，这被认为是*p-hacking*，使得多次测试无效的统计推断（[Harvey、Liu 和 Zhu 2016](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Harvey2016)）。
+
+然而，由于没有单一正确的方法来对投资组合进行排序，因此大量的选择会产生问题。研究人员应该如何让读者相信他们的结果不是来自 p-hacking ？为了规避这种困境，鼓励学者提供来自不同排序方案的证据作为***稳健性测试***，并报告多种方法以表明结果并不取决于单一选择。因此，溢价的稳健性是一个关键特征。
+
+下面我们进行了一系列稳健性测试，这也可以解释为 p-hacking 练习。为此，我们检查了表中所示不同规格的尺寸溢价`p_hacking_setup`。该函数`expand_grid()`生成一个包含其参数所有可能排列的表。请注意，我们使用该参数`data`来排除金融公司并截断时间序列。
+
+```{r}
+p_hacking_setup <- expand_grid(
+  n_portfolios = c(2, 5, 10),
+  exchanges = list("NYSE", c("NYSE", "NASDAQ", "AMEX")),
+  value_weighted = c(TRUE, FALSE),
+  data = parse_exprs(
+    'crsp_monthly; 
+     crsp_monthly |> filter(industry != "Finance");
+     crsp_monthly |> filter(month < "1990-06-01");
+     crsp_monthly |> filter(month >="1990-06-01")'
+  )
+)
+```
+
+为了加快计算速度，我们并行化（许多）不同的排序过程，如[Beta 估计](https://www-tidy--finance-org.translate.goog/r/beta-estimation.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)。最后，我们按降序报告最终的尺寸溢价。我们的数据中确实可能存在巨大的规模溢价，特别是当我们使用等权重投资组合时。
+
+```{r}
+n_cores = availableCores() / 2
+plan(multisession, workers = n_cores)
+
+options(future.globals.maxSize = 1000 * 1024^2)  # 设置为 1000 MB
+
+p_hacking_setup <- p_hacking_setup |>
+  mutate(size_premium = future_pmap(
+    .l = list(
+      n_portfolios,
+      exchanges,
+      value_weighted,
+      data
+    ),
+    .f = ~ compute_portfolio_returns(
+      n_portfolios = ..1,
+      exchanges = ..2,
+      value_weighted = ..3,
+      data = eval_tidy(..4)
+    )
+  ))
+
+p_hacking_results <- p_hacking_setup |>
+  mutate(data = map_chr(data, deparse)) |>
+  unnest(size_premium) |>
+  arrange(desc(size_premium))
+p_hacking_results
+```
+
+## **Size溢价的变化**
+
+[我们在图 3](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-803)中提供了一个图表，显示了不同的保费。该图还显示了与文献中使用的平均 Fama-French SMB（小减大）溢价的关系，我们将其作为垂直虚线包括在内。
+
+```{r}
+p_hacking_results |>
+  ggplot(aes(x = size_premium)) +
+  geom_histogram(bins = nrow(p_hacking_results)) +
+  labs(
+    x = NULL, y = NULL,
+    title = "Distribution of size premiums for different sorting choices"
+  ) +
+  geom_vline(aes(xintercept = mean(factors_ff3_monthly$smb)),
+    linetype = "dashed"
+  ) +
+  scale_x_continuous(labels = percent)
+```
+
+图 3：垂直虚线表示 Fama-French SMB 的平均溢价。
+
+## **练习**
+
+1.  我们对上述尺寸分布有了一些见解。然而，我们没有分析上市交易所和行业的平均规模。哪些上市交易所/行业拥有最大的公司？绘制随着时间的推移三个上市交易所的平均公司规模。你得出什么结论？
+
+2.  我们计算断点，但在上面的说明中没有查看它们。这可能涵盖潜在的数据错误。绘制十种规模的投资组合随时间变化的断点。然后，计算两个极端投资组合之间的差异并将其绘制出来。描述你的结果。
+
+3.  我们上面分析的回报并未考虑市场风险敞口的差异，即 CAPM beta。更改函数`compute_portfolio_returns()`以输出 CAPM alpha 或 beta，而不是平均超额收益。
+
+4.  虽然您看到了 p-hacking 活动的回报分布，但我们没有显示哪些选择会产生最大的影响。找到一种方法来调查哪个选择变量对估计规模溢价影响最大。
+
+5.  我们计算了几种尺寸溢价，但它们并不遵循Fama 和 French ( [1993](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Fama1993) )的定义。我们的哪种方法最接近他们的中小企业溢价？
