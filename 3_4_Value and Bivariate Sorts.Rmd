@@ -1,0 +1,225 @@
+---
+title: "3_4_Value and Bivariate Sorts"
+author: "Wenqiang Li"
+date: "2024-03-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+在本章中，我们将单变量投资组合分析扩展到双变量排序，这意味着我们根据两个特征将股票分配到投资组合。双变量排序经常用于学术资产定价文献中，并且是 Fama-French 三因子模型中因子的基础。然而，一些学者也使用三个分组变量的排序。从概念上讲，投资组合排序很容易应用于更高的维度。
+
+我们根据公司规模和账面市值比形成投资组合。为了计算账面市值比，需要会计数据，这需要在投资组合形成过程中采取额外的步骤。最后，我们演示了如何使用所谓的独立和依赖投资组合排序在两个排序变量上形成投资组合。
+
+当前章节依赖于这组 R 包。
+
+```{r}
+library(tidyverse)
+library(RSQLite)
+```
+
+## **数据准备**
+
+[首先，我们从访问和管理财务数据](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)`SQLite`中介绍的数据库加载必要的数据。我们根据 CRSP 样本进行投资组合排序，但仅在内存中保留必要的列。[我们使用与规模排序和 P-Hacking](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)相同的公司规模数据源。
+
+```{r}
+tidy_finance <- dbConnect(
+  SQLite(),
+  "data/tidy_finance_r.sqlite",
+  extended_types = TRUE
+)
+
+crsp_monthly <- tbl(tidy_finance, "crsp_monthly") |>
+    select(
+    permno, gvkey, month, ret_excess,
+    mktcap, mktcap_lag, exchange
+  ) |> 
+  collect() |>
+  drop_na()
+```
+
+此外，我们利用会计数据。最常见的会计数据来源是 Compustat。在此应用程序中，我们只需要账面权益数据，这是我们从数据库中选择的。此外，我们将变量转换`datadate`为其月度值，因为我们在这里只考虑月度回报，不需要考虑确切的日期。为了实现这一点，我们使用函数`floor_date()`。
+
+```{r}
+book_equity <- tbl(tidy_finance, "compustat") |>
+  select(gvkey, datadate, be) |>
+  collect() |>
+  drop_na() |>
+  mutate(month = floor_date(ymd(datadate), "month"))
+```
+
+## **账面市值比**
+
+处理会计数据的一个基本问题是*前瞻偏差*；我们不得在形成投资组合时包含当时不为公众所知的数据。当然，研究人员在回顾过去时比特工当时拥有更多信息。然而，交易策略的异常超额收益不应依赖于信息优势，因为差异不可能是知情代理人交易的结果。因此，我们必须滞后会计信息。
+
+我们的市值和公司规模继续落后一个月。然后，我们计算账面市值比率，该比率将公司的账面权益与其市场权益联系起来。账面市值比高（低）的公司称为价值（成长）公司。在匹配同月的会计和市场权益信息后，我们的账面市值比滞后了六个月。这是一种足够保守的方法，因为会计信息通常在六个月之前就发布了。然而，在资产定价文献中，也使用了更长的滞后。^[1](https://www-tidy--finance-org.translate.goog/r/value-and-bivariate-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fn1)^
+
+由于有两个变量，即公司规模滞后一个月，账面市值比滞后六个月，我们使用`sorting_date`为此目的创建的 - 列将这些排序变量合并到我们的回报中。数据准备的最后一步处理变量频率的差异。每月记录回报和公司规模。然而，会计信息仅每年发布一次。因此，我们每年只将账面市值与一个月进行匹配，并且有 11 个空观察值。为了解决这个频率问题，我们将每家公司最新的账面市值比带到随后的几个月，即我们用最新的报告填充缺失的观察结果。这是通过`fill()`按日期和公司排序（我们通过`permno`和标识`gvkey`）并在公司基础上（我们像`group_by()`往常一样这样做）排序后通过 - 函数完成的。我们过滤掉所有超过一年的会计数据观察结果。作为最后一步，我们删除所有缺少条目的行，因为回报无法与任何年度报告匹配。
+
+```{r}
+me <- crsp_monthly |>
+  mutate(sorting_date = month %m+% months(1)) |>
+  select(permno, sorting_date, me = mktcap)
+
+bm <- book_equity |>
+  inner_join(crsp_monthly, join_by(gvkey, month)) |>
+  mutate(
+    bm = be / mktcap,
+    sorting_date = month %m+% months(6),
+    comp_date = sorting_date
+  ) |>
+  select(permno, gvkey, sorting_date, comp_date, bm)
+
+data_for_sorts <- crsp_monthly |>
+  left_join(
+    bm, join_by(permno, gvkey, month == sorting_date)
+  ) |>
+  left_join(
+    me, join_by(permno, month == sorting_date)
+  ) |>
+  select(
+    permno, gvkey, month, ret_excess,
+    mktcap_lag, me, bm, exchange, comp_date
+  )
+
+data_for_sorts <- data_for_sorts |>
+  arrange(permno, gvkey, month) |>
+  group_by(permno, gvkey) |>
+  fill(bm, comp_date) |>
+  ungroup() |> 
+  filter(comp_date > month %m-% months(12)) |>
+  select(-comp_date) |>
+  drop_na()
+```
+
+投资组合排序准备的最后一步是计算断点。我们继续使用相同的函数，允许指定用于断点的交换。此外，我们将参数重新引入`sorting_variable`函数中以定义不同的排序变量。
+
+```{r}
+assign_portfolio <- function(data, 
+                             sorting_variable, 
+                             n_portfolios, 
+                             exchanges) {
+  breakpoints <- data |>
+    filter(exchange %in% exchanges) |>
+    pull({{ sorting_variable }}) |>
+    quantile(
+      probs = seq(0, 1, length.out = n_portfolios + 1),
+      na.rm = TRUE,
+      names = FALSE
+    )
+
+  assigned_portfolios <- data |>
+    mutate(portfolio = findInterval(
+      pick(everything()) |>
+        pull({{ sorting_variable }}),
+      breakpoints,
+      all.inside = TRUE
+    )) |>
+    pull(portfolio)
+  
+  return(assigned_portfolios)
+}
+```
+
+在这些数据准备步骤之后，我们在独立和依赖的基础上呈现双变量投资组合排序。
+
+## **独立排序**
+
+双变量排序在由两个排序变量跨越的二维空间内创建投资组合。然后，可以通过投资于相应变量范围两端投资组合的交易策略的回报差异来评估任一排序变量的回报影响。在下面的示例中，我们使用账面市值比和公司规模作为排序变量创建一个五乘五的矩阵。我们最终得到了 25 个投资组合。*由于我们对价值溢价*（即高账面市值比和低账面市值比公司之间的回报差异）感兴趣，因此我们做多账面市值比最高公司的五个投资组合，并做空账面价值最低公司的五个投资组合上市公司。两端的五个投资组合是由于我们采用的规模分割以及账面市值分割而产生的。
+
+为了实现独立的二元投资组合排序，我们分别为每个排序变量分配每月投资组合，以分别创建变量`portfolio_bm`和`portfolio_me`。然后，将这些单独的投资组合组合起来，最终排序存储在`portfolio_combined`. 分配投资组合后，我们计算每个投资组合每月的平均回报。此外，我们保留账面市值比投资组合，因为它使价值溢价的计算更加容易。另一种选择是在单独的步骤中分解合并的投资组合。请注意，我们通过市值来衡量每个投资组合中的股票，即我们决定对回报进行价值加权。
+
+```{r}
+value_portfolios <- data_for_sorts |>
+  group_by(month) |>
+  mutate(
+    portfolio_bm = assign_portfolio(
+      data = pick(everything()),
+      sorting_variable = "bm",
+      n_portfolios = 5,
+      exchanges = c("NYSE")
+    ),
+    portfolio_me = assign_portfolio(
+      data = pick(everything()),
+      sorting_variable = "me",
+      n_portfolios = 5,
+      exchanges = c("NYSE")
+    )) |>
+  group_by(month, portfolio_bm, portfolio_me) |>
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag),
+    .groups = "drop"
+  )
+```
+
+有了我们每月的投资组合回报，我们就可以计算价值溢价了。然而，我们仍然需要决定如何投资账面市价比最高的五个和最低的五个投资组合。最常见的方法是对这些投资组合进行同等权衡，但这是另一位研究人员的选择。然后，我们计算高账面市值比和低账面市值比投资组合之间的回报差，并显示平均价值溢价。
+
+```{r}
+value_premium <- value_portfolios |>
+  group_by(month, portfolio_bm) |>
+  summarize(ret = mean(ret), .groups = "drop_last") |>
+  summarize(
+    value_premium = ret[portfolio_bm == max(portfolio_bm)] -
+      ret[portfolio_bm == min(portfolio_bm)]
+  ) |> 
+  summarize(
+    value_premium = mean(value_premium)
+  )
+```
+
+由此产生的每月价值溢价为 0.43%，年化回报率为 5.3%。
+
+## **依赖排序**
+
+在上一个练习中，我们分配投资组合时没有考虑分配中的第二个变量。该协议称为独立投资组合排序。另一种选择，即依赖排序，在第一排序变量的每个存储桶内为第二排序变量创建投资组合。在下面的示例中，我们将公司分为五个规模的桶，并且在每个桶中，我们将公司分配到五个账面市值比投资组合。因此，我们有针对每个规模组的每月断点。独立和相关投资组合排序之间的决定是研究人员的另一种选择。请注意，依赖排序确保每个投资组合中的股票数量相等。
+
+为了实现依赖排序，我们首先通过调用`assign_portfolio()`with创建大小投资组合`sorting_variable = "me"`。然后，在分配账面市值比投资组合之前，我们再次按月份和投资组合规模对数据进行分组。其余的实现与以前相同。最后，我们计算价值溢价。
+
+```{r}
+value_portfolios <- data_for_sorts |>
+  group_by(month) |>
+  mutate(portfolio_me = assign_portfolio(
+    data = pick(everything()),
+    sorting_variable = "me",
+    n_portfolios = 5,
+    exchanges = c("NYSE")
+  )) |>
+  group_by(month, portfolio_me) |>
+  mutate(
+    portfolio_bm = assign_portfolio(
+      data = pick(everything()),
+      sorting_variable = "bm",
+      n_portfolios = 5,
+      exchanges = c("NYSE")
+    )) |>
+  group_by(month, portfolio_me, portfolio_bm) |>
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag),
+    .groups = "drop"
+  )
+
+value_premium <- value_portfolios |>
+  group_by(month, portfolio_bm) |>
+  summarize(ret = mean(ret), .groups = "drop_last") |>
+  summarize(
+    value_premium = ret[portfolio_bm == max(portfolio_bm)] -
+      ret[portfolio_bm == min(portfolio_bm)]
+  ) |> 
+  summarize(
+    value_premium = mean(value_premium)
+  )
+```
+
+附属类别的每月价值溢价为 0.38%，这意味着每年的年化溢价为 4.6%。
+
+总的来说，我们在本章中展示了如何进行双变量投资组合排序。在一种情况下，我们对投资组合进行独立排序。然而，我们还讨论了如何创建依赖的投资组合类别。[沿着规模排序和 P-Hacking](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)的思路，我们看到研究人员必须做出多少选择才能实现投资组合排序，而双变量排序会增加选择的数量。
+
+## **练习**
+
+1.  在[规模排序和 P-Hacking](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)中，我们研究了市场权益的分布。对账面净值和账面市值比重复此分析（以及断点图，即十分位数）。
+
+2.  当我们调查投资组合时，我们只关注回报。然而，了解投资组合的特征也很有趣。编写一个函数来计算 25 个独立和相关排序的投资组合的规模和账面市值比的平均特征。
+
+3.  至于规模溢价，这里构建的价值溢价也没有遵循Fama和French（[1993](https://www-tidy--finance-org.translate.goog/r/value-and-bivariate-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Fama1993)）。[实施尺寸排序和 P-Hacking](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)中的 p-hacking 设置，以找到最接近其 HML 溢价的溢价。

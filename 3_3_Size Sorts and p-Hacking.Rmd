@@ -298,7 +298,7 @@ p_hacking_results
 
 ## **Size溢价的变化**
 
-[我们在图 3](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-803)中提供了一个图表，显示了不同的保费。该图还显示了与文献中使用的平均 Fama-French SMB（小减大）溢价的关系，我们将其作为垂直虚线包括在内。
+[我们在图 3](https://www-tidy--finance-org.translate.goog/r/size-sorts-and-p-hacking.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#fig-803)中提供了一个图表，显示了不同的溢价。该图还显示了与文献中使用的平均 Fama-French SMB（小减大）溢价的关系，我们将其作为垂直虚线包括在内。
 
 ```{r}
 p_hacking_results |>
