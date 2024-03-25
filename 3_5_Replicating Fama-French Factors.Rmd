@@ -1,0 +1,378 @@
+---
+title: "3_5_Replicating Fama-French Factors"
+author: "Wenqiang Li"
+date: "2024-03-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+在本章中，我们提供了著名的 Fama-French 因子投资组合的复制。 Fama-French 因子模型是Fama 和 French（[2015](https://www-tidy--finance-org.translate.goog/r/replicating-fama-and-french-factors.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-FamaFrench2015)）实证资产定价的基石。除了以传统 CAPM beta 为代表的市场因素之外，三因素模型还包括规模和价值因素来解释收益的横截面。它的后继者五因素模型还包括盈利能力和投资作为解释因素。
+
+我们从三因素模型开始。我们已经在[价值排序和双变量排序](https://www-tidy--finance-org.translate.goog/r/value-and-bivariate-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)中介绍了规模和价值因素，它们的定义保持不变：规模是做多小公司和做空大公司的 SMB 因素（小减大）。价值因子是 HML（高-减-低），在账面市价比较高的公司中做多，在账面市价比较低的公司中做空。
+
+复制三因素模型后，我们通过构建盈利因素RMW（稳健减弱）作为运营盈利能力高和低的公司的回报与投资因素CMA（保守）之间的差值，转向五因素。 -负-激进）作为高投资率与低投资率公司之间的差异。
+
+当前章节依赖于这组 R 包。
+
+```{r}
+library(tidyverse)
+library(RSQLite)
+```
+
+## **数据准备**
+
+我们使用 CRSP 和 Compustat 作为数据源，因为我们需要相同的变量来以 Fama 和 French 的方式计算因子。因此，下面没有什么新内容，我们只从[访问和管理财务数据](https://www-tidy--finance-org.translate.goog/r/accessing-and-managing-financial-data.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)以及[WRDS、CRSP 和 Compustat](https://www-tidy--finance-org.translate.goog/r/wrds-crsp-and-compustat.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)`SQLite`中介绍的数据库加载数据。
+
+```{r}
+tidy_finance <- dbConnect(
+  SQLite(),
+  "/Users/desmondli/Desktop/College/互联网与数字经济/赵宣凯老师/tidy finance/tidy_finance.sqlite",
+  extended_types = TRUE
+)
+
+crsp_monthly <- tbl(tidy_finance, "crsp_monthly") |>
+  select(
+    permno, gvkey, month, ret_excess,
+    mktcap, mktcap_lag, exchange
+  ) |>
+  collect()
+
+compustat <- tbl(tidy_finance, "compustat") |>
+    select(gvkey, datadate, be, op, inv) |>
+    collect() 
+
+factors_ff3_monthly <- tbl(tidy_finance, "factors_ff3_monthly") |>
+  select(month, smb, hml) |>
+  collect()
+
+factors_ff5_monthly <- tbl(tidy_finance, "factors_ff5_monthly") |>
+  select(month, smb, hml, rmw, cma) |>
+  collect()
+```
+
+然而，当我们开始合并数据集来计算溢价时，价值排序和双变量排序存在一些差异。首先，Fama 和 French 在今年 6 月形成投资组合$t$，其中 7 月的回报是相应投资组合的第一个月度回报。对于公司规模，他们因此使用 6 月份记录的市值。然后保持不变直到每年六月$t+1$。
+
+其次，Fama 和 French 也有不同的计算账面市值比的协议。他们使用截至年底的市场权益$t-1$以及当年报告的账面权益$t-1$，即`datadate`是去年以内的。因此，账面市值比可以基于长达 18 个月的会计信息。市场权益也不一定反映与账面权益相同的时间点。其他排序变量类似于从年份中获取的账面权益$t-1$。
+
+为了实现所有这些时间滞后，我们再次使用临时`sorting_date`列。请注意，当我们组合信息时，我们希望每年和库存有一个观察结果，因为我们只对计算全年保持不变的断点感兴趣。我们通过`distinct()`在下面的块末尾调用来确保这一点。
+
+```{r}
+size <- crsp_monthly |>
+  filter(month(month) == 6) |>
+  mutate(sorting_date = month %m+% months(1)) |>
+  select(permno, exchange, sorting_date, size = mktcap)
+
+market_equity <- crsp_monthly |>
+  filter(month(month) == 12) |>
+  mutate(sorting_date = ymd(str_c(year(month) + 1, "0701)"))) |>
+  select(permno, gvkey, sorting_date, me = mktcap)
+
+book_to_market <- compustat |>
+  mutate(sorting_date = ymd(str_c(year(datadate) + 1, "0701"))) |>
+  select(gvkey, sorting_date, be) |>
+  inner_join(market_equity, join_by(gvkey, sorting_date)) |>
+  mutate(bm = be / me) |>
+  select(permno, sorting_date, me, bm)
+
+sorting_variables <- size |>
+  inner_join(
+    book_to_market, join_by(permno, sorting_date)
+    ) |>
+  drop_na() |>
+  distinct(permno, sorting_date, .keep_all = TRUE)
+```
+
+## **投资组合排序**
+
+接下来，我们用调整后的函数构建我们的投资组合`assign_portfolio()`。 Fama 和 French 依赖于 NYSE 特定的断点，他们在中位数的规模维度上形成两个投资组合，在 30 和 70 百分位数的彼此排序变量维度上形成三个投资组合，并且使用依赖排序。账面市值排序需要对[价值排序和双变量排序](https://www-tidy--finance-org.translate.goog/r/value-and-bivariate-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)中的函数进行调整，因为`seq()`我们将生成的排序不会产生正确的断点。`n_portfolios`我们现在指定 ，而不是`percentiles`，它将断点序列作为函数调用中指定的对象。具体来说，我们赋予`percentiles = c(0, 0.3, 0.7, 1)`该函数。此外，我们`inner_join()`对返回数据进行了计算，以确保我们在第一步计算断点时仅使用交易股票。
+
+```{r}
+assign_portfolio <- function(data, 
+                             sorting_variable, 
+                             percentiles) {
+  breakpoints <- data |>
+    filter(exchange == "NYSE") |>
+    pull({{ sorting_variable }}) |>
+    quantile(
+      probs = percentiles,
+      na.rm = TRUE,
+      names = FALSE
+    )
+
+  assigned_portfolios <- data |>
+    mutate(portfolio = findInterval(
+      pick(everything()) |>
+        pull({{ sorting_variable }}),
+      breakpoints,
+      all.inside = TRUE
+    )) |>
+    pull(portfolio)
+  
+  return(assigned_portfolios)
+}
+
+portfolios <- sorting_variables |>
+  group_by(sorting_date) |>
+  mutate(
+    portfolio_size = assign_portfolio(
+      data = pick(everything()),
+      sorting_variable = size,
+      percentiles = c(0, 0.5, 1)
+    ),
+    portfolio_bm = assign_portfolio(
+      data = pick(everything()),
+      sorting_variable = bm,
+      percentiles = c(0, 0.3, 0.7, 1)
+    )
+  ) |>
+  ungroup() |> 
+  select(permno, sorting_date, 
+         portfolio_size, portfolio_bm)
+```
+
+接下来，我们将投资组合合并到今年剩余时间的回报数据中。为了实现此步骤，我们`sorting_date`通过将排序日期设置为 7 月，在返回数据中创建一个新列$t-1$如果月份是六月（年$t$） 或更早或到当年的七月$t$如果月份是七月或更晚。
+
+```{r}
+portfolios <- crsp_monthly |>
+  mutate(sorting_date = case_when(
+    month(month) <= 6 ~ ymd(str_c(year(month) - 1, "0701")),
+    month(month) >= 7 ~ ymd(str_c(year(month), "0701"))
+  )) |>
+  inner_join(portfolios, join_by(permno, sorting_date))
+```
+
+## **Fama-French 三因素模型**
+
+有了回报数据和指定的投资组合，我们现在可以计算六个投资组合中每个投资组合的价值加权平均回报。然后，我们形成 Fama-French 因子。对于规模因素（即 SMB），我们在三个小型投资组合中做多，并通过取任一组的平均值来做空三个大型投资组合。对于价值因子（即 HML），我们在两个高账面市价比投资组合中做多，并在两个低账面市价比投资组合中做空，再次对它们进行同等权重。
+
+```{r}
+factors_replicated <- portfolios |>
+  group_by(portfolio_size, portfolio_bm, month) |>
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag), .groups = "drop"
+  ) |>
+  group_by(month) |>
+  summarize(
+    smb_replicated = mean(ret[portfolio_size == 1]) -
+      mean(ret[portfolio_size == 2]),
+    hml_replicated = mean(ret[portfolio_bm == 3]) -
+      mean(ret[portfolio_bm == 1])
+  )
+```
+
+## **复制评估**
+
+在上一节中，我们按照 Fama 和 French 概述的程序复制了尺寸和价值溢价。最后的问题是：我们有多接近？我们通过使用回归分析中的两个时间序列估计来回答这个问题`lm()`。如果我们做得很好，那么我们应该看到一个不显着的截距（拒绝系统误差的概念）、一个接近 1 的系数（表示高相关性）和一个接近 1 的调整后的 R 平方（表示高相关性）。解释方差的比例）。
+
+```{r}
+test <- factors_ff3_monthly |>
+  inner_join(factors_replicated, join_by(month)) |>
+  mutate(
+    across(c(smb_replicated, hml_replicated), ~round(., 4))
+  )
+```
+
+为了测试 SMB 因素是否成功，我们运行以下回归：
+
+```{r}
+model_smb <- lm(smb ~ smb_replicated, data = test)
+summary(model_smb)
+```
+
+SMB 因子的结果确实令人信服，因为满足上述所有三个标准，并且系数为 0.99，R 平方为 99%。
+
+```{r}
+model_hml <- lm(hml ~ hml_replicated, data = test)
+summary(model_hml)
+```
+
+HML 因子的复制也很成功，尽管系数略低，为 0.96，R 平方约为 96%。
+
+因此，证据让我们得出结论，尽管我们不知道其底层代码，但我们在复制原始 Fama-French 规模和价值溢价方面做得相对较好。从我们的角度来看，只有原始数据维护者提供的附加信息才有可能实现完美匹配。
+
+## **Fama-French 五因素模型**
+
+现在，让我们开始复制五因素模型。我们对上面的表格进行了扩展，添加了运营盈利能力和投资的`other_sorting_variables`附加特征。请注意，`drop_na()`会产生不同的样本量，因为一些具有价值的公司可能没有`op` or `inv`值。
+
+```{r}
+other_sorting_variables <- compustat |>
+  mutate(sorting_date = ymd(str_c(year(datadate) + 1, "0701"))) |>
+  select(gvkey, sorting_date, be, op, inv) |>
+  inner_join(market_equity, 
+             join_by(gvkey, sorting_date)) |>
+  mutate(bm = be / me) |>
+  select(permno, sorting_date, me, be, bm, op, inv)
+
+sorting_variables <- size |>
+  inner_join(
+    other_sorting_variables, 
+    join_by(permno, sorting_date)
+    ) |>
+  drop_na() |>
+  distinct(permno, sorting_date, .keep_all = TRUE)
+```
+
+每个月，我们都会将所有股票独立分类为两种规模的投资组合。另一方面，价值、盈利能力和投资组合是基于投资组合规模进行依赖排序的结果。然后，我们将投资组合合并到今年剩余时间的回报数据中，如上所述。
+
+```{r}
+portfolios <- sorting_variables |>
+  group_by(sorting_date) |>
+  mutate(
+    portfolio_size = assign_portfolio(
+      data = pick(everything()),
+      sorting_variable = size,
+      percentiles = c(0, 0.5, 1)
+    )) |> 
+  group_by(sorting_date, portfolio_size) |> 
+  mutate(
+    across(c(bm, op, inv), ~assign_portfolio(
+      data = pick(everything()), 
+      sorting_variable = ., 
+      percentiles = c(0, 0.3, 0.7, 1)),
+      .names = "portfolio_{.col}"
+    )
+  ) |>
+  ungroup() |> 
+  select(permno, sorting_date, 
+         portfolio_size, portfolio_bm,
+         portfolio_op, portfolio_inv)
+
+portfolios <- crsp_monthly |>
+  mutate(sorting_date = case_when(
+    month(month) <= 6 ~ ymd(str_c(year(month) - 1, "0701")),
+    month(month) >= 7 ~ ymd(str_c(year(month), "0701"))
+  )) |>
+  inner_join(portfolios, join_by(permno, sorting_date))
+```
+
+现在，我们想要构建每个因子，但这次规模因子实际上排在最后，因为它是所有其他因子组合的平均结果。这种依赖性就是我们将价值加权投资组合回报表保留为单独对象以供稍后重用的原因。如上所述，我们通过做多账面市值比高的两个投资组合并做空账面市值比低的两个投资组合来构建价值因子 HML。
+
+```{r}
+portfolios_value <- portfolios |>
+  group_by(portfolio_size, portfolio_bm, month) |>
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag), 
+    .groups = "drop"
+  )
+
+factors_value <- portfolios_value |>
+  group_by(month) |>
+  summarize(
+    hml_replicated = mean(ret[portfolio_bm == 3]) -
+      mean(ret[portfolio_bm == 1])
+  )
+```
+
+对于盈利能力因素RMW，我们在两个高盈利能力投资组合中持有多头头寸，在两个低盈利能力投资组合中持有空头头寸。
+
+```{r}
+portfolios_profitability <- portfolios |>
+  group_by(portfolio_size, portfolio_op, month) |>
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag), 
+    .groups = "drop"
+  ) 
+
+factors_profitability <- portfolios_profitability |>
+  group_by(month) |>
+  summarize(
+    rmw_replicated = mean(ret[portfolio_op == 3]) -
+      mean(ret[portfolio_op == 1])
+  )
+```
+
+对于投资因子 CMA，我们做多两个低投资组合并做空两个高投资组合。
+
+```{r}
+portfolios_investment <- portfolios |>
+  group_by(portfolio_size, portfolio_inv, month) |>
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag), 
+    .groups = "drop"
+  )
+
+factors_investment <- portfolios_investment |>
+  group_by(month) |>
+  summarize(
+    cma_replicated = mean(ret[portfolio_inv == 1]) -
+      mean(ret[portfolio_inv == 3])
+  )
+```
+
+最后，规模因子 SMB 是通过做多六个小型投资组合并做空六个大型投资组合而构建的。
+
+```{r}
+factors_size <- bind_rows(
+  portfolios_value,
+  portfolios_profitability,
+  portfolios_investment
+) |> 
+  group_by(month) |>
+  summarize(
+    smb_replicated = mean(ret[portfolio_size == 1]) -
+      mean(ret[portfolio_size == 2])
+  )
+```
+
+然后，我们将所有因素连接到一个数据框中，并再次构建一个合适的表来运行测试来评估我们的复制。
+
+```{r}
+factors_replicated <- factors_size |>
+  full_join(
+    factors_value, join_by(month)
+  ) |>
+  full_join(
+    factors_profitability, join_by(month)
+  ) |>
+  full_join(
+    factors_investment, join_by(month)
+  )
+
+test <- factors_ff5_monthly |>
+  inner_join(factors_replicated, join_by(month)) |>
+  mutate(
+    across(c(smb_replicated, hml_replicated, 
+             rmw_replicated, cma_replicated), ~round(., 4))
+  )
+```
+
+让我们用大小因子再次开始复制评估：
+
+```{r}
+model_smb <- lm(smb ~ smb_replicated, data = test)
+summary(model_smb)
+```
+
+SMB 因子的结果非常令人信服，因为满足上述所有三个标准，并且系数为 0.97，R 平方为 99%。
+
+```{r}
+model_hml <- lm(hml ~ hml_replicated, data = test)
+summary(model_hml)
+```
+
+HML 因子的复制也很成功，尽管系数略高，为 0.99，R 平方约为 93%。
+
+```{r}
+model_rmw <- lm(rmw ~ rmw_replicated, data = test)
+summary(model_rmw)
+```
+
+我们还能够很好地复制 RMW 因子，系数为 0.95，R 平方约为 94%。
+
+```{r}
+model_cma <- lm(cma ~ cma_replicated, data = test)
+summary(model_cma)
+```
+
+最后，CMA 因子也复制得很好，系数为 0.96，R 平方约为 95%。
+
+总体而言，我们的方法似乎复制了 Fama-French 五因素模型以及三个因素。
+
+## **练习**
+
+1.  Fama 和 French ( [1993](https://www-tidy--finance-org.translate.goog/r/replicating-fama-and-french-factors.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp#ref-Fama1993) )声称他们的样本排除了在 Compustat 中出现两年的公司。实施此附加过滤器并比较复制工作的改进。
+
+2.  [Kenneth French](https://translate.google.com/website?sl=auto&tl=zh-CN&hl=zh-CN&client=webapp&u=https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/Data_Library/variable_definitions.html)在他的主页上提供了有关如何构建用于投资组合排序的最常见变量的说明。尝试复制`E/P`其主页上提供的（收益/价格）单变量投资组合排序回报时间序列，并使用回归评估您的复制工作。
