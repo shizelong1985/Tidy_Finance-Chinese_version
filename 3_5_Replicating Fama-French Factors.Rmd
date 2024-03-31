@@ -87,7 +87,7 @@ sorting_variables <- size |>
 
 ## **投资组合排序**
 
-接下来，我们用调整后的函数构建我们的投资组合`assign_portfolio()`。 Fama 和 French 依赖于 NYSE 特定的断点，他们在中位数的规模维度上形成两个投资组合，在 30 和 70 百分位数的彼此排序变量维度上形成三个投资组合，并且使用依赖排序。账面市值排序需要对[价值排序和双变量排序](https://www-tidy--finance-org.translate.goog/r/value-and-bivariate-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)中的函数进行调整，因为`seq()`我们将生成的排序不会产生正确的断点。`n_portfolios`我们现在指定 ，而不是`percentiles`，它将断点序列作为函数调用中指定的对象。具体来说，我们赋予`percentiles = c(0, 0.3, 0.7, 1)`该函数。此外，我们`inner_join()`对返回数据进行了计算，以确保我们在第一步计算断点时仅使用交易股票。
+接下来，我们用调整后的函数构建我们的投资组合`assign_portfolio()`。 Fama 和 French 依赖于 NYSE 特定的断点，他们在中位数的规模维度上形成两个投资组合，在 30 和 70 百分位数的彼此排序变量维度上形成三个投资组合，并且使用独立排序。账面市值排序需要对[价值排序和双变量排序](https://www-tidy--finance-org.translate.goog/r/value-and-bivariate-sorts.html?_x_tr_sl=auto&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN&_x_tr_pto=wapp)中的函数进行调整，因为`seq()`我们将生成的排序不会产生正确的断点。`n_portfolios`我们现在指定 ，而不是`percentiles`，它将断点序列作为函数调用中指定的对象。具体来说，我们赋予`percentiles = c(0, 0.3, 0.7, 1)`该函数。此外，我们`inner_join()`对返回数据进行了计算，以确保我们在第一步计算断点时仅使用交易股票。
 
 ```{r}
 assign_portfolio <- function(data, 
